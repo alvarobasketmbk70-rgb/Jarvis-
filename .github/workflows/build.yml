@@ -41,16 +41,16 @@ jobs:
         uses: actions/cache@v4
         with:
           path: |
-            sherpa-onnx-2.0.3.aar
+            sherpa-onnx-1.13.8.aar
             vits-piper-es_ES-davefx-medium.tar.bz2
-          key: sherpa-2.0.3-davefx-medium
+          key: sherpa-1.13.8-davefx-medium
 
       - name: Voz incluida (sherpa-onnx + Piper davefx)
         run: |
-          [ -f sherpa-onnx-2.0.3.aar ] || curl -fL -o sherpa-onnx-2.0.3.aar https://github.com/k2-fsa/sherpa-onnx/releases/download/v2.0.3/sherpa-onnx-2.0.3.aar
+          [ -f sherpa-onnx-1.13.8.aar ] || curl -fL -o sherpa-onnx-1.13.8.aar https://github.com/k2-fsa/sherpa-onnx/releases/download/v1.13.8/sherpa-onnx-1.13.8.aar
           [ -f vits-piper-es_ES-davefx-medium.tar.bz2 ] || curl -fL -o vits-piper-es_ES-davefx-medium.tar.bz2 https://github.com/k2-fsa/sherpa-onnx/releases/download/tts-models/vits-piper-es_ES-davefx-medium.tar.bz2
           mkdir -p app/libs app/src/main/assets
-          cp sherpa-onnx-2.0.3.aar app/libs/sherpa-onnx.aar
+          cp sherpa-onnx-1.13.8.aar app/libs/sherpa-onnx.aar
           rm -rf vits-piper-es_ES-davefx-medium app/src/main/assets/tts-es
           tar xjf vits-piper-es_ES-davefx-medium.tar.bz2
           mv vits-piper-es_ES-davefx-medium app/src/main/assets/tts-es

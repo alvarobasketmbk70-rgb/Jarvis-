@@ -13,7 +13,7 @@ import java.io.File
  */
 object LocalVoice {
     private const val ASSET = "tts-es"
-    private const val VERSION = "vits-piper-es_ES-davefx-medium-1"
+    private const val VERSION = "vits-piper-es_ES-davefx-medium-2"
     private val lock = Any()
     @Volatile
     private var tts: OfflineTts? = null
