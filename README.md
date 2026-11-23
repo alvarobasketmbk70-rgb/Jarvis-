@@ -1,5 +1,7 @@
 # J.A.R.V.I.S. — asistente de voz para Android
 
+**Descargar el APK:** https://github.com/alvarobasketmbk70-rgb/Jarvis-/releases/download/ultima/Jarvis.apk (se actualiza solo con cada cambio)
+
 App nativa en Kotlin, pensada para el Xiaomi Redmi Note 15 4G (HyperOS / Android 14–15), pero válida para cualquier Android 8 o superior.
 
 ## Qué hace
