@@ -35,6 +35,9 @@ class SettingsActivity : Activity() {
     private lateinit var swWa: Switch
     private lateinit var swWake: Switch
     private lateinit var spVoice: Spinner
+    private lateinit var spNeural: Spinner
+    private lateinit var swNeural: Switch
+    private var speaker: Speaker? = null
     private lateinit var tvAcc: TextView
     private var tts: TextToSpeech? = null
     private var voiceIds: List<String> = listOf("")
@@ -62,7 +65,14 @@ class SettingsActivity : Activity() {
         col.addView(header("Personalización"))
         etName = makeField("¿Cómo quiere que le llame? (señor, Tony…)", if (prefs.userName == "señor") "" else prefs.userName); col.addView(etName)
         etCc = makeField("Prefijo de país para WhatsApp (34 = España)", prefs.countryCode, number = true); col.addView(etCc)
-        col.addView(note("Voz de Jarvis"))
+        col.addView(header("Voz de Jarvis"))
+        swNeural = switch("Voz neuronal de Gemini (mucho más natural; usa la clave de Gemini e internet)", prefs.neuralVoice); col.addView(swNeural)
+        col.addView(note("Voz neuronal"))
+        spNeural = Spinner(this)
+        spNeural.adapter = ArrayAdapter(this, android.R.layout.simple_spinner_dropdown_item, NeuralVoice.VOICES.map { it.second })
+        spNeural.setSelection(NeuralVoice.VOICES.indexOfFirst { it.first == prefs.neuralVoiceName }.coerceAtLeast(0))
+        col.addView(spNeural)
+        col.addView(note("Voz del sistema (se usa sin internet o sin clave de Gemini)"))
         spVoice = Spinner(this); col.addView(spVoice)
         col.addView(button("Probar voz") { testVoice() })
         swConv = switch("Modo conversación: sigue escuchando después de responder", prefs.conversationMode); col.addView(swConv)
@@ -110,6 +120,7 @@ class SettingsActivity : Activity() {
 
     override fun onDestroy() {
         tts?.shutdown()
+        speaker?.shutdown()
         super.onDestroy()
     }
 
@@ -121,6 +132,8 @@ class SettingsActivity : Activity() {
         prefs.conversationMode = swConv.isChecked
         prefs.autoSendWhatsApp = swWa.isChecked
         prefs.voiceName = voiceIds.getOrElse(spVoice.selectedItemPosition) { "" }
+        prefs.neuralVoice = swNeural.isChecked
+        prefs.neuralVoiceName = NeuralVoice.VOICES.getOrElse(spNeural.selectedItemPosition) { NeuralVoice.VOICES[0] }.first
     }
 
     // ---------- Voces ----------
@@ -147,13 +160,20 @@ class SettingsActivity : Activity() {
     }
 
     private fun testVoice() {
-        val t = tts ?: return
-        val id = voiceIds.getOrElse(spVoice.selectedItemPosition) { "" }
-        if (id.isBlank()) t.setLanguage(ES) else t.voices?.firstOrNull { it.name == id }?.let { t.setVoice(it) }
-        t.setPitch(0.92f)
-        t.setSpeechRate(1.05f)
-        val name = etName.text.toString().ifBlank { "señor" }
-        t.speak("A su servicio, $name. Todos los sistemas operativos.", TextToSpeech.QUEUE_FLUSH, null, "test")
+        save()
+        val sp = speaker ?: Speaker(this).also { speaker = it }
+        val name = prefs.userName
+        val key = prefs.apiKey
+        if (prefs.neuralVoice && (key.isBlank() || key.startsWith("sk-ant-"))) {
+            toast("La voz neuronal necesita una clave de Gemini. Mientras tanto suena la voz del sistema.")
+        } else if (prefs.neuralVoice) {
+            toast("Generando la voz… tarda un par de segundos.")
+        }
+        // Pequeña espera para que el motor del sistema termine de iniciarse la primera vez.
+        sp.stop()
+        window.decorView.postDelayed({
+            sp.speak("A su servicio, $name. Todos los sistemas están operativos. ¿En qué puedo ayudarle hoy?")
+        }, 400)
     }
 
     // ---------- Accesos a ajustes del sistema ----------

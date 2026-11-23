@@ -37,6 +37,12 @@ class Prefs(context: Context) {
     var autoSendWhatsApp: Boolean
         get() = sp.getBoolean("auto_wa", true)
         set(v) = sp.edit().putBoolean("auto_wa", v).apply()
+    var neuralVoice: Boolean
+        get() = sp.getBoolean("neural_voice", true)
+        set(v) = sp.edit().putBoolean("neural_voice", v).apply()
+    var neuralVoiceName: String
+        get() = (sp.getString("neural_voice_name", "") ?: "").ifBlank { "Charon" }
+        set(v) = sp.edit().putString("neural_voice_name", v).apply()
     var wakeWord: Boolean
         get() = sp.getBoolean("wake_word", false)
         set(v) = sp.edit().putBoolean("wake_word", v).apply()
