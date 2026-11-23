@@ -160,7 +160,9 @@ class MainActivity : Activity() {
         val perms = mutableListOf(
             Manifest.permission.RECORD_AUDIO,
             Manifest.permission.READ_CONTACTS,
-            Manifest.permission.CALL_PHONE
+            Manifest.permission.CALL_PHONE,
+            Manifest.permission.READ_CALENDAR,
+            Manifest.permission.ACCESS_COARSE_LOCATION
         )
         if (Build.VERSION.SDK_INT >= 33) perms.add(Manifest.permission.POST_NOTIFICATIONS)
         val missing = perms.filter { checkSelfPermission(it) != PackageManager.PERMISSION_GRANTED }
@@ -203,14 +205,20 @@ class MainActivity : Activity() {
         listening = true
         orb.state = OrbView.State.LISTENING
         status.text = "Escuchando…"
-        try {
-            BeepMuter.mute(this)
-            r.startListening(RecognizerFactory.intent(this, true))
-        } catch (e: Exception) {
-            listening = false
-            recognizer?.destroy(); recognizer = null
-            idle("No he podido usar el micrófono.")
-        }
+        // Como Siri: pausa la música mientras escucha y suena el aviso de holograma.
+        InteractionFocus.hold(this)
+        val chime = Chime.start()
+        main.postDelayed({
+            if (!listening) return@postDelayed
+            try {
+                BeepMuter.mute(this)
+                r.startListening(RecognizerFactory.intent(this, true))
+            } catch (e: Exception) {
+                listening = false
+                recognizer?.destroy(); recognizer = null
+                idle("No he podido usar el micrófono.")
+            }
+        }, chime)
     }
 
     private fun stopListening() {
@@ -222,6 +230,8 @@ class MainActivity : Activity() {
     }
 
     private fun idle(msg: String = IDLE_HINT) {
+        if (orb.state != OrbView.State.IDLE) Chime.end()
+        InteractionFocus.release(this)
         orb.state = OrbView.State.IDLE
         status.text = msg
     }
@@ -294,6 +304,7 @@ class MainActivity : Activity() {
             speaker.stop(); idle(); return
         }
         val action = reply.action
+        if (InteractionFocus.touchesMedia(action)) InteractionFocus.release(this)
         if (action == null) {
             val t = reply.text ?: "…"
             val follow = reply.listenAgain || (prefs.conversationMode && reply.fromLlm)
@@ -306,12 +317,12 @@ class MainActivity : Activity() {
             moveTaskToBack(true)
             main.postDelayed({
                 val r = executor.execute(action)
-                finishTurn(userText, ActionExecutor.choose(reply, r), false)
+                finishTurn(userText, ActionExecutor.choose(reply, r, prefs.userName), false)
             }, 700)
             return
         }
         val r = executor.execute(action)
-        finishTurn(userText, ActionExecutor.choose(reply, r), reply.listenAgain)
+        finishTurn(userText, ActionExecutor.choose(reply, r, prefs.userName), reply.listenAgain)
     }
 
     private fun finishTurn(userText: String, text: String, listenAfter: Boolean) {

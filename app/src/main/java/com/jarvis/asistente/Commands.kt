@@ -46,6 +46,8 @@ object Commands {
     private val WAKE_ONLY = Regex("^(oye |hola |hey )?(janus|yanus|llanus|ianus|yanos|llanos|janos|ianos|yannus|jano)$")
     private val CANCEL = Regex("^(no|nada|nada mas|cancela|cancelar|cancelalo|olvidalo|dejalo|da igual|no importa|eso es todo|adios|hasta luego|nada gracias|no gracias)$")
     private val THANKS = Regex("^(gracias|muchas gracias|gracias (janus|yanus|llanus)|genial gracias|perfecto gracias|perfecto|genial)$")
+    private val BRIEFING = Regex("^(buenos dias|buen dia|buenas tardes|buenas|informe|dame el informe|informe del dia|resumen del dia|que tengo hoy|como pinta el dia|como viene el dia|empecemos)( janus| yanus| llanus| jano| senor)?$")
+    private val WEATHER = Regex("que tiempo hace|tiempo va a hacer|el tiempo (de )?hoy|va a llover|llovera|que temperatura|hace frio|hace calor|parte meteorologico|tiempo que hace")
     private val SHUT = Regex("^(callate|calla|silencio|para de hablar|basta|cierra el pico)$")
     private val REPEAT = Regex("^(repite|repitelo|repite eso|que has dicho|puedes repetir|como dices)$")
 
@@ -74,9 +76,11 @@ object Commands {
         val u = Utt(raw)
         val p = u.plain
         if (p.isEmpty()) return null
-        if (WAKE_ONLY.matches(p)) return Parse.Say("¿Sí? Le escucho.", listen = true)
-        if (CANCEL.matches(p)) return Parse.Say("De acuerdo.")
-        if (THANKS.matches(p)) return Parse.Say("Es un placer.")
+        if (WAKE_ONLY.matches(p)) return Parse.Say("¿Sí, {n}?", listen = true)
+        if (CANCEL.matches(p)) return Parse.Say(Personality.okay("{n}"))
+        if (THANKS.matches(p)) return Parse.Say(Personality.thanks("{n}"))
+        if (BRIEFING.matches(p)) return act("briefing")
+        if (WEATHER.containsMatchIn(p)) return act("weather")
         if (SHUT.matches(p)) return act("shutup")
         if (REPEAT.matches(p)) return act("repeat")
         if (Regex("(ajustes|configuracion|opciones) de (janus|yanus|llanus)|configurar? (janus|yanus|llanus)").containsMatchIn(p)) return act("jarvis_settings")

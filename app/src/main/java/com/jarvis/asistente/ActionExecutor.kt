@@ -34,9 +34,11 @@ class ActionExecutor(context: Context) {
         val SCREEN_TYPES = setOf("click", "scroll", "global", "type_text", "read_screen")
 
         /** Qué decir: lo de la IA si todo fue bien; si no, el resultado real de la acción. */
-        fun choose(reply: Reply, r: ExecResult): String {
+        fun choose(reply: Reply, r: ExecResult, name: String = "señor"): String {
             val say = reply.text
-            return if (!r.ok || r.informative || say.isNullOrBlank()) r.text else say
+            if (!r.ok || r.informative) return r.text
+            if (say.isNullOrBlank()) return Personality.confirm(r.text, name)
+            return say
         }
     }
 

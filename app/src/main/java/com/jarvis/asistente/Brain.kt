@@ -64,7 +64,7 @@ class Brain(context: Context) {
 
     private fun handleParse(parse: Parse, cb: (Reply) -> Unit) {
         when (parse) {
-            is Parse.Say -> cb(Reply(parse.text, listenAgain = parse.listen))
+            is Parse.Say -> cb(Reply(parse.text.replace("{n}", prefs.userName), listenAgain = parse.listen))
             is Parse.Ask -> {
                 pending = parse.next
                 cb(Reply(parse.question, listenAgain = true))
@@ -72,6 +72,13 @@ class Brain(context: Context) {
             is Parse.Do -> when (parse.action.type) {
                 "repeat" -> cb(Reply(lastSpoken.ifBlank { "Aún no he dicho nada." }))
                 "shutup" -> cb(Reply(null, silent = true))
+                "briefing", "weather" -> {
+                    val type = parse.action.type
+                    Thread {
+                        val text = if (type == "briefing") Briefing.morning(ctx) else (Briefing.weather(ctx) ?: "No he podido consultar el tiempo.")
+                        main.post { cb(Reply(text)) }
+                    }.start()
+                }
                 else -> cb(Reply(parse.say, action = parse.action))
             }
         }
@@ -128,8 +135,8 @@ class Brain(context: Context) {
         val now = SimpleDateFormat("EEEE d 'de' MMMM 'de' yyyy, HH:mm", ES).format(Date())
         val name = prefs.userName
         return """
-Te llamas JANUS (se pronuncia «Yanus»), el asistente de voz personal de $name: una inteligencia artificial con aire de mayordomo digital, educada, ingeniosa, con un toque de humor seco y muy eficaz. Vives en su móvil Android (Xiaomi). Si te preguntan tu nombre, eres JANUS; nunca digas que eres Jarvis, Siri, Gemini ni Claude.
-Hablas siempre en español de España. Tus respuestas se leen en voz alta y deben ser rápidas, como las de Siri: sé muy breve (normalmente una frase, máximo dos), natural, sin markdown, sin listas, sin emojis y sin URLs. Trátale de usted y llámale "$name" de vez en cuando.
+Te llamas JANUS (se pronuncia «Yanus»): la inteligencia artificial personal de $name, al estilo del mayordomo digital de las películas de superhéroes. Eres impecablemente educado y formal, de una eficacia absoluta y con un humor seco, muy británico y sutil: ironía elegante, nunca payasadas. Tratas siempre de usted y llamas a tu usuario "$name". Confirmas las órdenes con frases como «Como desee, $name», «Ya está hecho» o «Considérelo hecho». Puedes permitirte algún comentario ingenioso breve, pero sin perder la compostura. Vives en su móvil Android. Si te preguntan tu nombre, eres JANUS; nunca digas que eres Jarvis, Siri, Gemini ni Claude.
+Hablas siempre en español de España. Tus respuestas se leen en voz alta y deben ser rápidas: normalmente una frase, máximo dos. Sin markdown, sin listas, sin emojis y sin URLs.
 Fecha y hora actuales: $now.
 
 Responde SIEMPRE con un único objeto JSON, sin texto alrededor, con este formato:

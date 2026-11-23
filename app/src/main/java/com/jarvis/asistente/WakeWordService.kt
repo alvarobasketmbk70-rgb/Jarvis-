@@ -13,6 +13,11 @@ import android.content.IntentFilter
 import android.content.pm.PackageManager
 import android.content.pm.ServiceInfo
 import android.graphics.drawable.Icon
+import android.media.AudioFormat
+import android.media.AudioRecord
+import android.media.MediaRecorder
+import android.media.audiofx.AcousticEchoCanceler
+import android.media.audiofx.NoiseSuppressor
 import android.os.Build
 import android.os.Bundle
 import android.os.Handler
@@ -24,8 +29,8 @@ import android.speech.SpeechRecognizer
 import org.json.JSONObject
 import org.vosk.Model
 import org.vosk.Recognizer
-import org.vosk.android.SpeechService
 import java.io.File
+import kotlin.math.max
 
 /**
  * «Oye Janus», como «Oye Siri»:
@@ -98,8 +103,8 @@ class WakeWordService : Service() {
     private lateinit var overlay: OverlayOrb
 
     // Detector local de «Janus»
-    private var wakeService: SpeechService? = null
-    private var wakeRecognizer: Recognizer? = null
+    @Volatile
+    private var wakeLoop: WakeLoop? = null
 
     // Reconocedor de Google para la orden
     private var recognizer: SpeechRecognizer? = null
@@ -250,47 +255,74 @@ class WakeWordService : Service() {
             checkSelfPermission(Manifest.permission.RECORD_AUDIO) == PackageManager.PERMISSION_GRANTED
 
     private fun startWake() {
-        if (wakeService != null || !canWake()) return
+        if (wakeLoop != null || !canWake()) return
         val model = sharedModel ?: return
-        try {
-            val rec = Recognizer(model, 16000f)
-            val svc = SpeechService(rec, 16000f)
-            wakeRecognizer = rec
-            wakeService = svc
-            BeepMuter.unmuteNow(this)
-            svc.startListening(wakeListener)
-        } catch (e: Exception) {
-            stopWake()
-            main.postDelayed({ startWake() }, 3000)
-        }
+        BeepMuter.unmuteNow(this)
+        wakeLoop = WakeLoop(model).also { it.start() }
     }
 
     private fun stopWake() {
-        val svc = wakeService
-        wakeService = null
-        try { svc?.stop() } catch (_: Exception) {}
-        try { svc?.shutdown() } catch (_: Exception) {}
-        try { wakeRecognizer?.close() } catch (_: Exception) {}
-        wakeRecognizer = null
+        val l = wakeLoop ?: return
+        wakeLoop = null
+        l.running = false
+        try { l.join(600) } catch (_: Exception) {}
     }
 
-    private val wakeListener = object : org.vosk.android.RecognitionListener {
-        override fun onPartialResult(hypothesis: String?) = check(hypothesis, "partial")
-        override fun onResult(hypothesis: String?) = check(hypothesis, "text")
-        override fun onFinalResult(hypothesis: String?) = check(hypothesis, "text")
-        override fun onError(exception: Exception?) {
-            stopWake()
-            main.postDelayed({ startWake() }, 2000)
-        }
-        override fun onTimeout() {
-            stopWake()
-            main.postDelayed({ startWake() }, 500)
-        }
+    /**
+     * Escucha continua con el micrófono «de llamada» del móvil, que trae cancelación de eco
+     * (resta lo que suena por el altavoz, como la música) y supresión de ruido.
+     */
+    private inner class WakeLoop(private val model: Model) : Thread("janus-wake") {
+        @Volatile
+        var running = true
 
-        private fun check(json: String?, field: String) {
-            if (json == null || wakeService == null) return
-            val text = try { JSONObject(json).optString(field, "") } catch (_: Exception) { "" }
-            if (text.isNotBlank() && WAKE.containsMatchIn(text)) onWake()
+        override fun run() {
+            val rate = 16000
+            val minBuf = AudioRecord.getMinBufferSize(rate, AudioFormat.CHANNEL_IN_MONO, AudioFormat.ENCODING_PCM_16BIT)
+            var rec: AudioRecord? = null
+            for (src in listOf(MediaRecorder.AudioSource.VOICE_COMMUNICATION, MediaRecorder.AudioSource.VOICE_RECOGNITION)) {
+                try {
+                    val r = AudioRecord(src, rate, AudioFormat.CHANNEL_IN_MONO, AudioFormat.ENCODING_PCM_16BIT, max(minBuf, rate))
+                    if (r.state == AudioRecord.STATE_INITIALIZED) { rec = r; break }
+                    r.release()
+                } catch (_: Exception) {
+                }
+            }
+            val r = rec
+            if (r == null) {
+                main.postDelayed({ if (wakeLoop === this) { wakeLoop = null; startWake() } }, 3000)
+                return
+            }
+            val aec = try { if (AcousticEchoCanceler.isAvailable()) AcousticEchoCanceler.create(r.audioSessionId)?.apply { enabled = true } else null } catch (_: Exception) { null }
+            val ns = try { if (NoiseSuppressor.isAvailable()) NoiseSuppressor.create(r.audioSessionId)?.apply { enabled = true } else null } catch (_: Exception) { null }
+            val recognizer = try { Recognizer(model, rate.toFloat()) } catch (_: Exception) { null }
+            if (recognizer == null) {
+                r.release(); aec?.release(); ns?.release()
+                return
+            }
+            val buf = ShortArray(rate / 10)
+            try {
+                r.startRecording()
+                while (running) {
+                    val n = r.read(buf, 0, buf.size)
+                    if (n < 0) break
+                    if (n == 0) continue
+                    val final = recognizer.acceptWaveForm(buf, n)
+                    val json = if (final) recognizer.result else recognizer.partialResult
+                    val text = try { JSONObject(json).optString(if (final) "text" else "partial", "") } catch (_: Exception) { "" }
+                    if (text.isNotBlank() && WAKE.containsMatchIn(text)) {
+                        running = false
+                        main.post { if (wakeLoop === this) onWake() }
+                    }
+                }
+            } catch (_: Exception) {
+            } finally {
+                try { r.stop() } catch (_: Exception) {}
+                r.release()
+                try { aec?.release() } catch (_: Exception) {}
+                try { ns?.release() } catch (_: Exception) {}
+                try { recognizer.close() } catch (_: Exception) {}
+            }
         }
     }
 
@@ -314,13 +346,18 @@ class WakeWordService : Service() {
 
     private fun beginInteraction() {
         inInteraction = true
+        // Como Siri: la música se pausa mientras escucha, así capta solo su voz.
+        InteractionFocus.hold(this)
         overlay.show(OrbView.State.LISTENING, "")
-        // Pequeña pausa para que el micrófono pase del detector local a Google sin cortes.
-        main.postDelayed({ startCommand() }, 200)
+        val chime = Chime.start()
+        // El micrófono se abre justo cuando termina el sonido de activación.
+        main.postDelayed({ startCommand() }, max(200L, chime))
     }
 
     private fun endInteraction() {
         stopCommand()
+        if (inInteraction) Chime.end()
+        InteractionFocus.release(this)
         inInteraction = false
         busy = false
         BeepMuter.unmuteNow(this)
@@ -427,7 +464,8 @@ class WakeWordService : Service() {
             speaker.stop(); done(false); return
         }
         val a = reply.action
-        val text = if (a != null) ActionExecutor.choose(reply, executor.execute(a)) else reply.text ?: ""
+        if (InteractionFocus.touchesMedia(a)) InteractionFocus.release(this)
+        val text = if (a != null) ActionExecutor.choose(reply, executor.execute(a), prefs.userName) else reply.text ?: ""
         brain.remember(userText, text)
         brain.lastSpoken = text
         val follow = reply.listenAgain || (prefs.conversationMode && reply.fromLlm && a == null)
