@@ -150,7 +150,8 @@ Acciones disponibles:
 {"type":"whatsapp","contact":"nombre","message":"texto del mensaje"}
 {"type":"sms","contact":"nombre","message":"texto"}
 {"type":"media","cmd":"play|pause|next|previous"}
-{"type":"spotify_play","query":"canción, artista, álbum o playlist"}
+{"type":"spotify_play","query":"canción, artista, álbum o playlist"}   (busca y le da al play él mismo)
+{"type":"agent","app":"nombre de la app (opcional)","goal":"objetivo concreto"}   (para tareas de varios pasos dentro de una app: buscar algo, darle a me gusta, poner una lista, cambiar un ajuste… JANUS mira la pantalla y toca lo necesario)
 {"type":"youtube","query":"lo que buscar"}
 {"type":"alarm","hour":"7","minute":"30"}
 {"type":"timer","seconds":"300"}
@@ -185,7 +186,7 @@ object LlmClient {
     private var geminiModel: String? = null
     @Volatile
     private var thinkingOk = true
-    private val FAST_MODELS = listOf("gemini-3.5-flash-lite", "gemini-flash-lite-latest", "gemini-flash-latest")
+    private val FAST_MODELS = listOf("gemini-flash-latest", "gemini-3.5-flash-lite", "gemini-flash-lite-latest")
 
     /** Usa el modelo más rápido disponible (Flash-Lite) con el razonamiento al mínimo. */
     private fun gemini(key: String, model: String, system: String, history: List<Pair<String, String>>, user: String): String {

@@ -311,6 +311,16 @@ class MainActivity : Activity() {
             finishTurn(userText, t, follow)
             return
         }
+        if (ScreenAgent.handles(action)) {
+            // Tareas de varios pasos: JANUS se aparta y maneja la app él mismo.
+            status.text = reply.text ?: "En ello…"
+            if (!reply.text.isNullOrBlank()) speaker.speak(reply.text)
+            moveTaskToBack(true)
+            ScreenAgent.run(this, action, { p -> status.text = p }) { result ->
+                finishTurn(userText, result, false)
+            }
+            return
+        }
         if (action.type in ActionExecutor.SCREEN_TYPES) {
             // Las órdenes de pantalla actúan sobre la app de detrás: Janus se aparta primero.
             status.text = "Ejecutando…"

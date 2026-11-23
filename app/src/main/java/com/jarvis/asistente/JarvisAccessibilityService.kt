@@ -207,4 +207,82 @@ class JarvisAccessibilityService : AccessibilityService() {
         val s = seen.joinToString(". ")
         return if (s.length > 600) s.take(600) + "…" else s
     }
+
+    // ---------------- Para el modo agente ----------------
+
+    /** Foto de la pantalla para la IA: elementos numerados que se pueden tocar/escribir y textos visibles. */
+    class Snapshot(val text: String, val nodes: List<AccessibilityNodeInfo>, val pkg: String)
+
+    fun snapshot(): Snapshot {
+        val nodes = ArrayList<AccessibilityNodeInfo>()
+        val lines = ArrayList<String>()
+        val seenText = HashSet<String>()
+        var pkg = ""
+        for (root in roots()) {
+            if (pkg.isEmpty()) pkg = root.packageName?.toString() ?: ""
+            for (n in allNodes(root)) {
+                if (!n.isVisibleToUser) continue
+                val label = listOfNotNull(n.text, n.contentDescription, n.hintText)
+                    .map { it.toString().trim().replace("\n", " ") }
+                    .firstOrNull { it.isNotEmpty() }
+                val actionable = n.isClickable || n.isEditable || n.isScrollable || n.isLongClickable
+                if (actionable) {
+                    val kind = when {
+                        n.isEditable -> "campo de texto"
+                        n.isScrollable -> "lista desplazable"
+                        else -> "botón"
+                    }
+                    // Un botón sin texto propio toma el de sus hijos (p. ej. una fila de canción).
+                    val shown = label ?: childText(n)
+                    if (shown == null && !n.isEditable && !n.isScrollable) continue
+                    nodes.add(n)
+                    lines.add("[${nodes.size - 1}] $kind «${(shown ?: "").take(80)}»" + if (n.isEditable && n.isFocused) " (activo)" else "")
+                } else if (label != null && label.length > 1 && seenText.add(label)) {
+                    lines.add("· ${label.take(80)}")
+                }
+                if (lines.size >= 140) break
+            }
+        }
+        return Snapshot(lines.joinToString("\n").take(7000), nodes, pkg)
+    }
+
+    private fun childText(n: AccessibilityNodeInfo): String? {
+        val parts = ArrayList<String>()
+        for (i in 0 until n.childCount) {
+            val c = n.getChild(i) ?: continue
+            val t = (c.text ?: c.contentDescription)?.toString()?.trim()
+            if (!t.isNullOrEmpty()) parts.add(t)
+            if (parts.size >= 3) break
+        }
+        return parts.takeIf { it.isNotEmpty() }?.joinToString(" · ")
+    }
+
+    fun setText(node: AccessibilityNodeInfo, text: String): Boolean {
+        if (!node.isFocused) node.performAction(AccessibilityNodeInfo.ACTION_CLICK)
+        val args = Bundle().apply { putCharSequence(AccessibilityNodeInfo.ACTION_ARGUMENT_SET_TEXT_CHARSEQUENCE, text) }
+        return node.performAction(AccessibilityNodeInfo.ACTION_SET_TEXT, args)
+    }
+
+    /** Pulsa «Intro»/«Buscar» del teclado en el campo activo. */
+    fun pressEnter(): Boolean {
+        if (Build.VERSION.SDK_INT < 30) return false
+        for (root in roots()) {
+            val f = root.findFocus(AccessibilityNodeInfo.FOCUS_INPUT) ?: continue
+            if (f.performAction(AccessibilityNodeInfo.AccessibilityAction.ACTION_IME_ENTER.id)) return true
+        }
+        return false
+    }
+
+    /** Busca un botón de reproducir visible (no el de pausa) y lo pulsa. */
+    fun clickPlay(): Boolean {
+        for (root in roots()) {
+            val n = findNode(root) { x ->
+                val d = (x.contentDescription ?: x.text)?.toString()?.lowercase(ES) ?: ""
+                x.isVisibleToUser && (d == "reproducir" || d == "play" || d.startsWith("reproducir ") || d.startsWith("play ")) &&
+                    !d.contains("pausa") && !d.contains("pause")
+            } ?: continue
+            if (click(n)) return true
+        }
+        return false
+    }
 }

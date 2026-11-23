@@ -465,6 +465,16 @@ class WakeWordService : Service() {
         }
         val a = reply.action
         if (InteractionFocus.touchesMedia(a)) InteractionFocus.release(this)
+        if (ScreenAgent.handles(a) && a != null) {
+            overlay.show(OrbView.State.THINKING, reply.text ?: "En ello…")
+            ScreenAgent.run(this, a, { p -> if (overlay.isShown) overlay.setText(p) }) { result ->
+                brain.remember(userText, result)
+                brain.lastSpoken = result
+                overlay.show(OrbView.State.SPEAKING, result)
+                speaker.speak(result) { done(false) }
+            }
+            return
+        }
         val text = if (a != null) ActionExecutor.choose(reply, executor.execute(a), prefs.userName) else reply.text ?: ""
         brain.remember(userText, text)
         brain.lastSpoken = text

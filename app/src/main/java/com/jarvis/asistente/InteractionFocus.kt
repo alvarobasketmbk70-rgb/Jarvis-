@@ -38,5 +38,5 @@ object InteractionFocus {
     }
 
     /** Órdenes que controlan la música: hay que soltar el audio antes de ejecutarlas. */
-    fun touchesMedia(a: Action?): Boolean = a != null && a.type in setOf("media", "spotify_play", "youtube", "volume")
+    fun touchesMedia(a: Action?): Boolean = a != null && a.type in setOf("media", "spotify_play", "youtube", "volume", "agent")
 }
