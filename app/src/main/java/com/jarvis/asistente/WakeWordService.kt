@@ -111,6 +111,7 @@ class WakeWordService : Service() {
         BeepMuter.restoreAfterCrash(this)
         prefs = Prefs(this)
         speaker = Speaker(this)
+        speaker.onVoiceError = { reason -> if (overlay.isShown) overlay.setText("⚠ Sin voz: $reason") }
         brain = Brain(this)
         executor = ActionExecutor(this)
         overlay = OverlayOrb(this)

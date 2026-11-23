@@ -68,7 +68,7 @@ class SettingsActivity : Activity() {
         etName = makeField("¿Cómo quiere que le llame? (señor, Tony…)", if (prefs.userName == "señor") "" else prefs.userName); col.addView(etName)
         etCc = makeField("Prefijo de país para WhatsApp (34 = España)", prefs.countryCode, number = true); col.addView(etCc)
         col.addView(header("Voz de Janus"))
-        col.addView(note("Janus tiene una única voz, diseñada al estilo del asistente de la película. Necesita la clave de Gemini e internet; sin ellas habla con la voz básica del móvil."))
+        col.addView(note("Janus tiene una única voz, diseñada al estilo del asistente de la película. Necesita la clave de Gemini e internet; sin ellas no puede hablar (no usa ninguna otra voz)."))
         col.addView(button("Probar voz") { testVoice() })
         swConv = switch("Modo conversación: sigue escuchando después de responder", prefs.conversationMode); col.addView(swConv)
         swWa = switch("Enviar WhatsApp automáticamente (requiere accesibilidad)", prefs.autoSendWhatsApp); col.addView(swWa)
@@ -130,19 +130,15 @@ class SettingsActivity : Activity() {
     // ---------- Voz ----------
     private fun testVoice() {
         save()
-        val sp = speaker ?: Speaker(this).also { speaker = it }
+        val sp = speaker ?: Speaker(this).also { s ->
+            speaker = s
+            s.onVoiceError = { reason -> toast("No se pudo generar la voz: $reason") }
+        }
         val name = prefs.userName
         val key = prefs.apiKey
-        if (prefs.neuralVoice && (key.isBlank() || key.startsWith("sk-ant-"))) {
-            toast("La voz neuronal necesita una clave de Gemini. Mientras tanto suena la voz del sistema.")
-        } else if (prefs.neuralVoice) {
-            toast("Generando la voz… tarda un par de segundos.")
-        }
-        // Pequeña espera para que el motor del sistema termine de iniciarse la primera vez.
+        if (key.isNotBlank() && !key.startsWith("sk-ant-")) toast("Generando la voz de JANUS…")
         sp.stop()
-        window.decorView.postDelayed({
-            sp.speak("A su servicio, $name. Todos los sistemas están operativos. ¿En qué puedo ayudarle hoy?")
-        }, 400)
+        sp.speak("A su servicio, $name. Soy JANUS. Todos los sistemas están operativos.")
     }
 
     // ---------- Accesos a ajustes del sistema ----------

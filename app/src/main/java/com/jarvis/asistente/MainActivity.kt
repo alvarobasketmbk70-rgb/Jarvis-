@@ -50,6 +50,7 @@ class MainActivity : Activity() {
     private var resumed = false
     private var greeted = false
     private var listenOnResume = false
+    private var lastVoiceError: String? = null
 
     // ---------------- Ciclo de vida ----------------
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -63,6 +64,12 @@ class MainActivity : Activity() {
         greeted = quick
         listenOnResume = quick
         speaker = Speaker(this) { onTtsReady() }
+        speaker.onVoiceError = { reason ->
+            if (reason != lastVoiceError) {
+                lastVoiceError = reason
+                addBubble("⚠ No he podido hablar: $reason", false)
+            }
+        }
         requestNeededPermissions()
         if (prefs.apiKey.isBlank()) {
             addBubble("Consejo: en ⚙ puede añadir una clave de IA gratuita para conversar conmigo y activar la accesibilidad para que pueda tocar la pantalla por usted.", false)

@@ -1,4 +1,4 @@
-name: Muestras de voz
+name: Diagnóstico de voz e IA
 
 on:
   workflow_dispatch:
@@ -20,4 +20,4 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           gh release delete voces --yes --cleanup-tag || true
-          gh release create voces muestras/*.wav --title "Muestras de voz de JANUS" --notes "Toque cada archivo para escucharlo."
+          gh release create voces muestras/*.wav --title "Muestra de la voz de JANUS" --notes "Toque el archivo para escucharlo."

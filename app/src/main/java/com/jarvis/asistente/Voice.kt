@@ -32,14 +32,13 @@ import kotlin.math.max
 import kotlin.math.sin
 
 /**
- * Voz de Janus. Usa la voz neuronal de Gemini en streaming (empieza a sonar en cuanto llega
- * el primer trozo de audio) con caché en disco; si falla, cae a la voz del sistema.
+ * Voz de JANUS. Es la ÚNICA voz: la neuronal de Gemini, en streaming y con caché.
+ * No hay voz de respaldo; si no se puede generar, se avisa del motivo con [onVoiceError].
  */
-class Speaker(context: Context, private val onReady: (() -> Unit)? = null) : TextToSpeech.OnInitListener {
+class Speaker(context: Context, onReady: (() -> Unit)? = null) {
     private val appCtx = context.applicationContext
     private val prefs = Prefs(appCtx)
     private val main = Handler(Looper.getMainLooper())
-    private val callbacks = ConcurrentHashMap<String, () -> Unit>()
     private val am = appCtx.getSystemService(AudioManager::class.java)
     private val attrs = AudioAttributes.Builder()
         .setUsage(AudioAttributes.USAGE_ASSISTANT)
@@ -49,86 +48,31 @@ class Speaker(context: Context, private val onReady: (() -> Unit)? = null) : Tex
         .setAudioAttributes(attrs)
         .build()
     @Volatile
-    private var ready = false
-    @Volatile
     private var generation = 0
     @Volatile
     private var neuralBusy = false
-    private var appliedVoice: String? = null
-    private val tts: TextToSpeech = TextToSpeech(appCtx, this)
 
-    val isSpeaking: Boolean get() = neuralBusy || (ready && tts.isSpeaking)
+    /** Se llama (en el hilo principal) con un motivo legible cuando la voz no se puede generar. */
+    var onVoiceError: ((String) -> Unit)? = null
+
+    val isSpeaking: Boolean get() = neuralBusy
 
     init {
         NeuralVoice.init(appCtx)
-        neuralKey()?.let { NeuralVoice.prewarm(it, prefs.neuralVoiceName, commonPhrases()) }
-    }
-
-    private fun commonPhrases(): List<String> {
-        val n = prefs.userName
-        val h = Calendar.getInstance().get(Calendar.HOUR_OF_DAY)
-        val saludo = when (h) {
-            in 6..12 -> "Buenos días"
-            in 13..20 -> "Buenas tardes"
-            else -> "Buenas noches"
-        }
-        return listOf(
-            "¿Sí, $n?", "$saludo, $n. ¿En qué puedo ayudarle?", "Música en pausa.", "Reanudando la música.",
-            "Siguiente canción.", "Canción anterior.", "De acuerdo.", "Es un placer.",
-            "Linterna encendida.", "Linterna apagada.", "Volumen subido.", "Volumen bajado."
-        )
-    }
-
-    override fun onInit(status: Int) {
-        if (status == TextToSpeech.SUCCESS) {
-            val r = tts.setLanguage(ES)
-            if (r == TextToSpeech.LANG_MISSING_DATA || r == TextToSpeech.LANG_NOT_SUPPORTED) tts.setLanguage(Locale("es"))
-            tts.setSpeechRate(1.08f)
-            tts.setPitch(0.85f)
-            tts.setAudioAttributes(attrs)
-            tts.setOnUtteranceProgressListener(object : UtteranceProgressListener() {
-                override fun onStart(utteranceId: String?) {}
-                override fun onDone(utteranceId: String?) = finished(utteranceId, true)
-                @Deprecated("Deprecated in Java")
-                override fun onError(utteranceId: String?) = finished(utteranceId, true)
-                override fun onError(utteranceId: String?, errorCode: Int) = finished(utteranceId, true)
-                override fun onStop(utteranceId: String?, interrupted: Boolean) = finished(utteranceId, false)
-            })
-            ready = true
-        }
+        neuralKey()?.let { NeuralVoice.prewarm(it, prefs.neuralVoiceName, listOf("¿Sí, ${prefs.userName}?")) }
         main.post { onReady?.invoke() }
-    }
-
-    private fun finished(id: String?, fire: Boolean) {
-        am.abandonAudioFocusRequest(focus)
-        if (id == null) return
-        val cb = callbacks.remove(id) ?: return
-        if (fire) main.post { cb() }
-    }
-
-    private fun applyVoice() {
-        val wanted = prefs.voiceName
-        if (wanted == appliedVoice) return
-        appliedVoice = wanted
-        try {
-            if (wanted.isBlank()) {
-                tts.setLanguage(ES)
-                // Voz de respaldo: masculina y de España si el móvil tiene alguna.
-                val male = tts.voices?.filter { v ->
-                    v.locale.language == "es" && !v.isNetworkConnectionRequired &&
-                        v.name.contains("male", ignoreCase = true) && !v.name.contains("female", ignoreCase = true)
-                }?.sortedBy { if (it.locale.country == "ES") 0 else 1 }?.firstOrNull()
-                if (male != null) tts.setVoice(male)
-            } else {
-                tts.voices?.firstOrNull { it.name == wanted }?.let { tts.setVoice(it) }
-            }
-        } catch (_: Exception) {
-        }
     }
 
     private fun neuralKey(): String? {
         val k = prefs.apiKey
-        return if (prefs.neuralVoice && k.isNotBlank() && !k.startsWith("sk-ant-")) k else null
+        return if (k.isNotBlank() && !k.startsWith("sk-ant-")) k else null
+    }
+
+    private fun fail(reason: String, done: (() -> Unit)?) {
+        main.post {
+            onVoiceError?.invoke(reason)
+            done?.invoke()
+        }
     }
 
     fun speak(text: String, done: (() -> Unit)? = null) {
@@ -143,10 +87,9 @@ class Speaker(context: Context, private val onReady: (() -> Unit)? = null) : Tex
         val gen = ++generation
         val key = neuralKey()
         if (key == null) {
-            systemSpeak(clean, done)
+            fail("falta la clave de Gemini. Péguela en ⚙ → «Clave de API».", done)
             return
         }
-        if (ready) tts.stop()
         neuralBusy = true
         am.requestAudioFocus(focus)
         val voice = prefs.neuralVoiceName
@@ -171,25 +114,13 @@ class Speaker(context: Context, private val onReady: (() -> Unit)? = null) : Tex
             }
             if (gen != generation) return@Thread
             neuralBusy = false
+            am.abandonAudioFocusRequest(focus)
             if (!played) {
-                main.post { if (gen == generation) systemSpeak(clean, done) }
+                fail(NeuralVoice.friendlyError(), done)
                 return@Thread
             }
-            am.abandonAudioFocusRequest(focus)
             if (done != null) main.post { done() }
         }.start()
-    }
-
-    private fun systemSpeak(text: String, done: (() -> Unit)?) {
-        if (!ready) {
-            if (done != null) main.post { done() }
-            return
-        }
-        applyVoice()
-        val id = UUID.randomUUID().toString()
-        if (done != null) callbacks[id] = done
-        am.requestAudioFocus(focus)
-        if (tts.speak(text, TextToSpeech.QUEUE_FLUSH, null, id) != TextToSpeech.SUCCESS) finished(id, true)
     }
 
     /** Reproduce PCM 16 bits mono 24 kHz a medida que llega. Se corta si cambia [generation]. */
@@ -278,19 +209,11 @@ class Speaker(context: Context, private val onReady: (() -> Unit)? = null) : Tex
     fun stop() {
         generation++
         neuralBusy = false
-        if (ready) tts.stop()
         am.abandonAudioFocusRequest(focus)
     }
 
     fun shutdown() {
-        generation++
-        neuralBusy = false
-        callbacks.clear()
-        try {
-            tts.stop(); tts.shutdown()
-        } catch (_: Exception) {
-        }
-        am.abandonAudioFocusRequest(focus)
+        stop()
     }
 }
 
@@ -356,14 +279,24 @@ object NeuralVoice {
     )
     private const val STYLE =
         "Eres JANUS, una inteligencia artificial con aire de mayordomo digital de película. Voz masculina de tono medio, nítida, refinada y extremadamente serena, con aire de mayordomo inglés culto. Habla con precisión casi digital, con fluidez y buen ritmo, cortés y con un humor seco muy sutil. Nunca exagera las emociones. Español de España."
-    private val MODELS = listOf("gemini-3.8-flash-tts", "gemini-3.1-flash-tts-preview")
+    private val MODELS = listOf(
+        "gemini-3.8-flash-tts", "gemini-3.8-flash-lite-tts", "gemini-3.1-flash-tts-preview",
+        "gemini-2.5-flash-preview-tts", "gemini-2.5-flash-tts"
+    )
+
+    /** Modelo + forma de pedirlo (en streaming o no, con estilo estructurado o en el texto). */
+    private data class Combo(val model: String, val streaming: Boolean, val structured: Boolean)
+
+    @Volatile
+    private var working: Combo? = null
+    @Volatile
+    var lastError: String? = null
+        private set
+    @Volatile
+    private var lastCode = 0
     private val memory = object : LinkedHashMap<String, ByteArray>(48, 0.75f, true) {
         override fun removeEldestEntry(eldest: MutableMap.MutableEntry<String, ByteArray>?): Boolean = size > 40
     }
-    @Volatile
-    private var workingModel: String? = null
-    @Volatile
-    private var structuredOk = true
     private var dir: File? = null
     @Volatile
     private var prewarming = false
@@ -420,42 +353,57 @@ object NeuralVoice {
         }.start()
     }
 
+    fun friendlyError(): String {
+        val e = lastError ?: "no se recibió audio"
+        return when {
+            lastCode == 429 -> "se ha alcanzado el límite de uso gratuito de la clave de Gemini. Espere un rato o revise su cuota en aistudio.google.com."
+            lastCode == 401 || lastCode == 403 || e.contains("API_KEY", true) -> "la clave de Gemini no es válida. Revísela en ⚙."
+            e.contains("UnknownHost", true) || e.contains("timeout", true) -> "no hay conexión a internet."
+            else -> "no he podido generar la voz ($e)."
+        }
+    }
+
     /**
-     * Pide el audio en streaming y llama a [onChunk] con cada trozo de PCM según llega.
+     * Pide el audio y llama a [onChunk] con cada trozo de PCM según llega.
+     * Prueba varios modelos y formas hasta dar con una que funcione con la clave, y la recuerda.
      * Devuelve true si el audio llegó completo. [onChunk] devuelve false para cancelar.
      */
     fun stream(key: String, voice: String, text: String, onChunk: (ByteArray) -> Boolean): Boolean {
-        val models = workingModel?.let { listOf(it) } ?: MODELS
-        for (m in models) {
+        val known = working
+        val combos = if (known != null) listOf(known) else MODELS.flatMap { m ->
+            listOf(Combo(m, true, true), Combo(m, false, true), Combo(m, true, false), Combo(m, false, false))
+        }
+        for (c in combos) {
             var delivered = false
             val wrapped: (ByteArray) -> Boolean = { delivered = true; onChunk(it) }
             try {
-                if (request(key, m, voice, text, structuredOk, wrapped)) {
-                    workingModel = m; return true
+                if (request(key, c, voice, text, wrapped)) {
+                    working = c; lastError = null; lastCode = 0
+                    return true
                 }
+                lastError = "${c.model}: respuesta sin audio"
             } catch (e: LlmClient.HttpError) {
-                if (e.code == 400 && structuredOk && !delivered) {
-                    try {
-                        if (request(key, m, voice, text, false, wrapped)) {
-                            structuredOk = false; workingModel = m; return true
-                        }
-                    } catch (_: Exception) {
-                    }
-                }
-                if (e.code == 429) return false
+                lastCode = e.code
+                lastError = "${c.model}: error ${e.code} ${e.message?.take(160) ?: ""}"
+                if (e.code == 429 || e.code == 401 || e.code == 403 || e.message?.contains("API_KEY") == true) return false
             } catch (e: Exception) {
-                return false
+                lastCode = 0
+                lastError = "${c.model}: ${e.javaClass.simpleName} ${e.message ?: ""}"
+                if (e is java.net.UnknownHostException) return false
             }
             if (delivered) return false
         }
+        // Si la combinación que funcionaba deja de hacerlo, la próxima vez se vuelven a probar todas.
+        if (known != null) working = null
         return false
     }
 
     private fun request(
-        key: String, model: String, voice: String, text: String, structured: Boolean,
+        key: String, c: Combo, voice: String, text: String,
         onChunk: (ByteArray) -> Boolean
     ): Boolean {
-        val part = if (structured) {
+        val model = c.model
+        val part = if (c.structured) {
             JSONObject().put("text", text).put("speech_metadata", JSONObject().put("style", STYLE))
         } else {
             JSONObject().put("text", "$STYLE\nLee exactamente este texto: $text")
@@ -471,23 +419,39 @@ object NeuralVoice {
                             .put("voiceConfig", JSONObject().put("prebuiltVoiceConfig", JSONObject().put("voiceName", voice)))
                     )
             )
-        val c = URL("https://generativelanguage.googleapis.com/v1beta/models/$model:streamGenerateContent?alt=sse")
-            .openConnection() as HttpURLConnection
+        val url = if (c.streaming) "https://generativelanguage.googleapis.com/v1beta/models/$model:streamGenerateContent?alt=sse"
+        else "https://generativelanguage.googleapis.com/v1beta/models/$model:generateContent"
+        val conn = URL(url).openConnection() as HttpURLConnection
         try {
-            c.requestMethod = "POST"
-            c.connectTimeout = 8000
-            c.readTimeout = 20000
-            c.doOutput = true
-            c.setRequestProperty("Content-Type", "application/json; charset=utf-8")
-            c.setRequestProperty("x-goog-api-key", key)
-            c.outputStream.use { it.write(body.toString().toByteArray(Charsets.UTF_8)) }
-            val code = c.responseCode
+            conn.requestMethod = "POST"
+            conn.connectTimeout = 8000
+            conn.readTimeout = 25000
+            conn.doOutput = true
+            conn.setRequestProperty("Content-Type", "application/json; charset=utf-8")
+            conn.setRequestProperty("x-goog-api-key", key)
+            conn.outputStream.use { it.write(body.toString().toByteArray(Charsets.UTF_8)) }
+            val code = conn.responseCode
             if (code !in 200..299) {
-                val err = c.errorStream?.bufferedReader(Charsets.UTF_8)?.use { it.readText() } ?: ""
+                val err = conn.errorStream?.bufferedReader(Charsets.UTF_8)?.use { it.readText() } ?: ""
                 throw LlmClient.HttpError(code, err.take(300))
             }
+            if (!c.streaming) {
+                val res = conn.inputStream.bufferedReader(Charsets.UTF_8).use { it.readText() }
+                val parts = JSONObject(res).optJSONArray("candidates")?.optJSONObject(0)
+                    ?.optJSONObject("content")?.optJSONArray("parts") ?: return false
+                var got = false
+                for (i in 0 until parts.length()) {
+                    val p = parts.getJSONObject(i)
+                    val inline = p.optJSONObject("inlineData") ?: p.optJSONObject("inline_data") ?: continue
+                    val data = inline.optString("data", "")
+                    if (data.isEmpty()) continue
+                    got = true
+                    if (!onChunk(Base64.decode(data, Base64.DEFAULT))) return true
+                }
+                return got
+            }
             var got = false
-            c.inputStream.bufferedReader(Charsets.UTF_8).use { reader ->
+            conn.inputStream.bufferedReader(Charsets.UTF_8).use { reader ->
                 while (true) {
                     val line = reader.readLine() ?: break
                     if (!line.startsWith("data:")) continue
@@ -507,7 +471,7 @@ object NeuralVoice {
             }
             return got
         } finally {
-            c.disconnect()
+            conn.disconnect()
         }
     }
 }
