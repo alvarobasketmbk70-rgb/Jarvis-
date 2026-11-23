@@ -6,3 +6,7 @@ local.properties
 *.iml
 app/src/main/assets/model-es/
 vosk-model-*
+app/libs/
+app/src/main/assets/tts-es/
+sherpa-onnx-*.aar
+vits-piper-*

@@ -69,7 +69,7 @@ class SettingsActivity : Activity() {
         etName = makeField("¿Cómo quiere que le llame? (señor, Tony…)", if (prefs.userName == "señor") "" else prefs.userName); col.addView(etName)
         etCc = makeField("Prefijo de país para WhatsApp (34 = España)", prefs.countryCode, number = true); col.addView(etCc)
         col.addView(header("Voz de Janus"))
-        col.addView(note("Voz tipo película: pegue aquí una clave gratuita de ElevenLabs (elevenlabs.io → Developers → API Keys). Janus usará la voz «Daniel», masculina y británica. Si la deja vacía, usa la voz de Gemini."))
+        col.addView(note("La voz de Janus viene incluida en la app: es gratis, sin límites y funciona sin internet. Opcional: si pega una clave de ElevenLabs, usará en su lugar la voz «Daniel» (británica, más de película), con su límite mensual gratuito."))
         etEleven = makeField("Clave de ElevenLabs", prefs.elevenKey, secret = true); col.addView(etEleven)
         col.addView(button("Probar voz") { testVoice() })
         swConv = switch("Modo conversación: sigue escuchando después de responder", prefs.conversationMode); col.addView(swConv)
@@ -139,7 +139,7 @@ class SettingsActivity : Activity() {
         }
         val name = prefs.userName
         val key = prefs.apiKey
-        if (prefs.elevenKey.isNotBlank() || (key.isNotBlank() && !key.startsWith("sk-ant-"))) toast("Generando la voz de JANUS…")
+        toast("Generando la voz de JANUS…")
         sp.stop()
         sp.speak("A su servicio, $name. Soy JANUS. Todos los sistemas están operativos.")
     }

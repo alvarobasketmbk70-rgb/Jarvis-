@@ -50,7 +50,7 @@ class Prefs(context: Context) {
         get() = true
         set(v) = sp.edit().putBoolean("ai_effect", v).apply()
     var voicePitch: Float
-        get() = 0.94f
+        get() = 0.92f
         set(v) = sp.edit().putFloat("voice_pitch", v).apply()
     var wakeWord: Boolean
         get() = sp.getBoolean("wake_word", true)

@@ -60,8 +60,8 @@ class Speaker(context: Context, onReady: (() -> Unit)? = null) {
     val isSpeaking: Boolean get() = neuralBusy
 
     init {
+        LocalVoice.prepareAsync(appCtx)
         NeuralVoice.init(appCtx)
-        if (prefs.elevenKey.isBlank()) neuralKey()?.let { NeuralVoice.prewarm(it, prefs.neuralVoiceName, listOf("¿Sí, ${prefs.userName}?")) }
         main.post { onReady?.invoke() }
     }
 
@@ -88,41 +88,55 @@ class Speaker(context: Context, onReady: (() -> Unit)? = null) {
         }
         val gen = ++generation
         val elevenKey = prefs.elevenKey.takeIf { it.isNotBlank() }
-        val key = neuralKey()
-        if (elevenKey == null && key == null) {
-            fail("falta la clave de voz. Péguela en ⚙ (ElevenLabs para la voz tipo película, o Gemini).", done)
-            return
-        }
         neuralBusy = true
         am.requestAudioFocus(focus)
-        val voice = if (elevenKey != null) "eleven-" + ElevenVoice.VOICE_ID else prefs.neuralVoiceName
-        pitch = if (elevenKey != null) 1.0f else prefs.voicePitch
         Thread {
             var played = false
-            val cached = NeuralVoice.cached(voice, clean)
-            if (cached != null) {
-                PcmPlayer(gen).apply { write(cached); finish() }
-                played = true
-            } else {
-                val player = PcmPlayer(gen)
-                val sink: (ByteArray) -> Boolean = { chunk ->
-                    if (gen != generation) false else { player.write(chunk); true }
-                }
-                val complete = if (elevenKey != null) ElevenVoice.stream(elevenKey, clean, sink)
-                else NeuralVoice.stream(key ?: "", voice, clean, sink)
-                if (player.bytes > 0) {
-                    player.finish()
+            var reason: String? = null
+            if (elevenKey != null) {
+                pitch = 1.0f
+                val voice = "eleven-" + ElevenVoice.VOICE_ID
+                val cached = NeuralVoice.cached(voice, clean)
+                if (cached != null) {
+                    PcmPlayer(gen, NeuralVoice.SAMPLE_RATE).apply { write(cached); finish() }
                     played = true
-                    if (complete && gen == generation) NeuralVoice.store(voice, clean, player.all())
                 } else {
-                    player.release()
+                    val player = PcmPlayer(gen, NeuralVoice.SAMPLE_RATE)
+                    val complete = ElevenVoice.stream(elevenKey, clean) { chunk ->
+                        if (gen != generation) false else { player.write(chunk); true }
+                    }
+                    if (player.bytes > 0) {
+                        player.finish(); played = true
+                        if (complete && gen == generation) NeuralVoice.store(voice, clean, player.all())
+                    } else {
+                        player.release()
+                        reason = ElevenVoice.friendlyError()
+                    }
+                }
+            }
+            if (!played && gen == generation) {
+                // Voz de JANUS incluida en la app: gratis, sin internet.
+                pitch = prefs.voicePitch
+                var player: PcmPlayer? = null
+                for (sentence in LocalVoice.sentences(clean)) {
+                    if (gen != generation) break
+                    val r = LocalVoice.synth(appCtx, sentence) ?: break
+                    val p = player ?: PcmPlayer(gen, r.second).also { player = it }
+                    p.write(r.first)
+                }
+                val p = player
+                if (p != null && p.bytes > 0) {
+                    p.finish(); played = true
+                } else {
+                    p?.release()
+                    if (reason == null) reason = "la voz incluida no se pudo cargar (${LocalVoice.lastError ?: "desconocido"})."
                 }
             }
             if (gen != generation) return@Thread
             neuralBusy = false
             am.abandonAudioFocusRequest(focus)
             if (!played) {
-                fail(if (elevenKey != null) ElevenVoice.friendlyError() else NeuralVoice.friendlyError(), done)
+                fail(reason ?: "no he podido hablar.", done)
                 return@Thread
             }
             if (done != null) main.post { done() }
@@ -130,16 +144,15 @@ class Speaker(context: Context, onReady: (() -> Unit)? = null) {
     }
 
     /** Reproduce PCM 16 bits mono 24 kHz a medida que llega. Se corta si cambia [generation]. */
-    private inner class PcmPlayer(private val gen: Int) {
+    private inner class PcmPlayer(private val gen: Int, private val rate: Int) {
         private var track: AudioTrack? = null
         private val all = ByteArrayOutputStream()
         private var carry: Byte? = null
-        private val fx: AiVoiceFx? = if (prefs.aiEffect) AiVoiceFx(NeuralVoice.SAMPLE_RATE) else null
+        private val fx: AiVoiceFx? = if (prefs.aiEffect) AiVoiceFx(rate) else null
         var bytes = 0
             private set
 
         private fun open(): AudioTrack? = try {
-            val rate = NeuralVoice.SAMPLE_RATE
             val minBuf = AudioTrack.getMinBufferSize(rate, AudioFormat.CHANNEL_OUT_MONO, AudioFormat.ENCODING_PCM_16BIT)
             AudioTrack.Builder()
                 .setAudioAttributes(attrs)
@@ -151,7 +164,8 @@ class Speaker(context: Context, onReady: (() -> Unit)? = null) {
                         .build()
                 )
                 .setTransferMode(AudioTrack.MODE_STREAM)
-                .setBufferSizeInBytes(max(minBuf, 8192))
+                // Búfer de ~2 s: mientras suena una frase se genera la siguiente, sin cortes.
+                .setBufferSizeInBytes(max(minBuf, rate * 4))
                 .build()
                 .also { t ->
                     if (pitch in 0.5f..1.5f && pitch != 1f) {

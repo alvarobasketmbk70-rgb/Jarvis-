@@ -34,7 +34,7 @@ android {
     }
     androidResources {
         // El modelo de voz local se copia tal cual.
-        noCompress += listOf("mdl", "fst", "int", "conf", "mat", "carpa")
+        noCompress += listOf("mdl", "fst", "int", "conf", "mat", "carpa", "onnx")
     }
     lint {
         abortOnError = false
@@ -46,4 +46,6 @@ dependencies {
     // Detector local de «Oye Janus» (sin internet, sin «bip», sin cortar el audio)
     implementation("net.java.dev.jna:jna:5.13.0@aar")
     implementation("com.alphacephei:vosk-android:0.3.47@aar")
+    // Voz de JANUS incluida (sherpa-onnx + Piper): gratis y sin internet
+    implementation(files("libs/sherpa-onnx.aar"))
 }
