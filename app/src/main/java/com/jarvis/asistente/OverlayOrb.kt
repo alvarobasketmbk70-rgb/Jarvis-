@@ -18,6 +18,7 @@ class OverlayOrb(private val ctx: Context) {
     private var orb: OrbView? = null
     private var label: TextView? = null
     private var text: TextView? = null
+    private var edge: EdgeGlowView? = null
     var onTap: (() -> Unit)? = null
 
     val isShown: Boolean get() = root != null
@@ -30,6 +31,7 @@ class OverlayOrb(private val ctx: Context) {
         if (!canShow()) return
         if (root == null && !build()) return
         orb?.state = state
+        edge?.speaking = state == OrbView.State.SPEAKING
         label?.text = when (state) {
             OrbView.State.LISTENING -> "ESCUCHANDO"
             OrbView.State.THINKING -> "PROCESANDO"
@@ -45,6 +47,7 @@ class OverlayOrb(private val ctx: Context) {
 
     fun setLevel(rmsDb: Float) {
         orb?.setLevel(rmsDb)
+        edge?.setLevel(rmsDb)
     }
 
     private fun build(): Boolean {
@@ -60,7 +63,7 @@ class OverlayOrb(private val ctx: Context) {
             setOnClickListener { onTap?.invoke() }
         }
         val o = OrbView(ctx)
-        panel.addView(o, LinearLayout.LayoutParams(dp(230), dp(230)))
+        panel.addView(o, LinearLayout.LayoutParams(dp(170), dp(170)))
         val l = TextView(ctx).apply {
             textSize = 11f
             letterSpacing = 0.25f
@@ -80,7 +83,7 @@ class OverlayOrb(private val ctx: Context) {
         panel.addView(t)
 
         val params = WindowManager.LayoutParams(
-            dp(300),
+            dp(280),
             WindowManager.LayoutParams.WRAP_CONTENT,
             WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY,
             WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or
@@ -91,6 +94,7 @@ class OverlayOrb(private val ctx: Context) {
             gravity = Gravity.BOTTOM or Gravity.CENTER_HORIZONTAL
             y = dp(56)
         }
+        addEdge()
         return try {
             panel.alpha = 0f
             panel.translationY = dp(40).toFloat()
@@ -103,7 +107,40 @@ class OverlayOrb(private val ctx: Context) {
         }
     }
 
+    private fun addEdge() {
+        val v = EdgeGlowView(ctx)
+        val p = WindowManager.LayoutParams(
+            WindowManager.LayoutParams.MATCH_PARENT,
+            WindowManager.LayoutParams.MATCH_PARENT,
+            WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY,
+            WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or
+                WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE or
+                WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN or
+                WindowManager.LayoutParams.FLAG_LAYOUT_NO_LIMITS,
+            PixelFormat.TRANSLUCENT
+        ).apply {
+            // Por debajo de 0,8 Android deja pasar los toques a la app de detrás.
+            alpha = 0.8f
+            if (android.os.Build.VERSION.SDK_INT >= 28) {
+                layoutInDisplayCutoutMode = WindowManager.LayoutParams.LAYOUT_IN_DISPLAY_CUTOUT_MODE_SHORT_EDGES
+            }
+        }
+        try {
+            v.alpha = 0f
+            wm.addView(v, p)
+            v.animate().alpha(1f).setDuration(250).start()
+            edge = v
+        } catch (_: Exception) {
+        }
+    }
+
     fun hide() {
+        edge?.let { e ->
+            edge = null
+            e.animate().alpha(0f).setDuration(200).withEndAction {
+                try { wm.removeView(e) } catch (_: Exception) {}
+            }.start()
+        }
         val r = root ?: return
         root = null; orb = null; label = null; text = null
         r.animate().alpha(0f).translationY(dp(40).toFloat()).setDuration(200).withEndAction {

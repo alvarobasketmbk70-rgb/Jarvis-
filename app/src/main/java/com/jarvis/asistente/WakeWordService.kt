@@ -32,6 +32,23 @@ class WakeWordService : Service() {
         private const val CHANNEL = "jarvis_wake"
         private const val NOTIF_ID = 7
         private const val ACTION_STOP = "com.jarvis.asistente.STOP_WAKE"
+        const val ACTION_SUMMON = "com.jarvis.asistente.SUMMON"
+
+        /**
+         * Invoca a Jarvis al estilo Siri (orbe flotante sobre la app actual). Devuelve false
+         * si no es posible y hay que abrir la app completa.
+         */
+        fun summon(ctx: Context): Boolean {
+            if (!android.provider.Settings.canDrawOverlays(ctx)) return false
+            if (ctx.checkSelfPermission(Manifest.permission.RECORD_AUDIO) != PackageManager.PERMISSION_GRANTED) return false
+            instance?.let { it.summonNow(); return true }
+            return try {
+                ctx.startForegroundService(Intent(ctx, WakeWordService::class.java).setAction(ACTION_SUMMON))
+                true
+            } catch (_: Exception) {
+                false
+            }
+        }
         private val WAKE = Regex("\\b(jarvis|yarvis|jarbis|yarbis|jervis|charvis|harvis|jarviz|chavis)\\b", RegexOption.IGNORE_CASE)
 
         @Volatile
@@ -117,6 +134,8 @@ class WakeWordService : Service() {
         if (intent?.action == ACTION_STOP) {
             prefs.wakeWord = false
             stopSelf()
+        } else if (intent?.action == ACTION_SUMMON) {
+            summonNow()
         }
         return START_NOT_STICKY
     }
@@ -172,6 +191,20 @@ class WakeWordService : Service() {
             } else {
                 main.postDelayed({ listen() }, 600)
             }
+        }
+    }
+
+    /** Muestra el orbe y escucha una orden directamente (sin necesidad de decir «Jarvis»). */
+    fun summonNow() {
+        main.post {
+            if (destroyed) return@post
+            speaker.stop()
+            recognizer?.cancel()
+            listening = false
+            busy = false
+            awaiting = true
+            overlay.show(OrbView.State.LISTENING, "")
+            main.postDelayed({ listen() }, 150)
         }
     }
 
@@ -260,6 +293,9 @@ class WakeWordService : Service() {
             if (awaiting) {
                 awaiting = false
                 overlay.hide()
+                if (!prefs.wakeWord) {
+                    stopSelf(); return
+                }
             } else if (!busy) {
                 overlay.hide()
             }
@@ -336,6 +372,9 @@ class WakeWordService : Service() {
     private fun done(follow: Boolean) {
         busy = false
         awaiting = follow
+        if (!follow && !prefs.wakeWord) {
+            main.postDelayed({ if (!busy && !awaiting) stopSelf() }, 800)
+        }
         if (follow) overlay.show(OrbView.State.LISTENING, "") else main.postDelayed({ if (!busy && !awaiting) overlay.hide() }, 600)
         listen()
     }

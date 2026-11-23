@@ -26,9 +26,9 @@ class JarvisSessionService : VoiceInteractionSessionService() {
 class JarvisSession(context: Context) : VoiceInteractionSession(context) {
     override fun onShow(args: Bundle?, showFlags: Int) {
         super.onShow(args, showFlags)
-        val i = Intent(context, MainActivity::class.java)
-            .putExtra(MainActivity.EXTRA_LISTEN, true)
-            .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_SINGLE_TOP)
+        // Como Siri: el orbe aparece sobre la app actual en lugar de abrir Jarvis a pantalla completa.
+        val i = Intent(context, com.jarvis.asistente.SummonActivity::class.java)
+            .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_NO_ANIMATION)
         try {
             startAssistantActivity(i)
         } catch (e: Exception) {

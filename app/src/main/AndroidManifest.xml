@@ -66,6 +66,14 @@
         </activity>
 
         <activity
+            android:name=".SummonActivity"
+            android:excludeFromRecents="true"
+            android:exported="false"
+            android:noHistory="true"
+            android:taskAffinity=""
+            android:theme="@android:style/Theme.Translucent.NoTitleBar" />
+
+        <activity
             android:name=".SettingsActivity"
             android:exported="false"
             android:label="Ajustes de Jarvis" />

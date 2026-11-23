@@ -9,9 +9,8 @@ import android.service.quicksettings.TileService
 class JarvisTileService : TileService() {
     override fun onClick() {
         super.onClick()
-        val i = Intent(this, MainActivity::class.java)
-            .putExtra(MainActivity.EXTRA_LISTEN, true)
-            .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_SINGLE_TOP)
+        val i = Intent(this, SummonActivity::class.java)
+            .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_NO_ANIMATION)
         if (Build.VERSION.SDK_INT >= 34) {
             val pi = PendingIntent.getActivity(this, 0, i, PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT)
             startActivityAndCollapse(pi)
