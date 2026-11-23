@@ -132,6 +132,7 @@ class Speaker(context: Context, private val onReady: (() -> Unit)? = null) : Tex
     }
 
     fun speak(text: String, done: (() -> Unit)? = null) {
+        BeepMuter.unmuteNow(appCtx)
         val clean = text.replace(Regex("[*#_`]"), "").trim()
         if (clean.isEmpty()) {
             if (done != null) main.post { done() }

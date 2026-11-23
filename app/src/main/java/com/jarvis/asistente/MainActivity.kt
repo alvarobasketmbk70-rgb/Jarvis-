@@ -54,6 +54,7 @@ class MainActivity : Activity() {
     // ---------------- Ciclo de vida ----------------
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        BeepMuter.restoreAfterCrash(this)
         buildUi()
         prefs = Prefs(this)
         brain = Brain(this)
@@ -182,6 +183,7 @@ class MainActivity : Activity() {
         orb.state = OrbView.State.LISTENING
         status.text = "Escuchando…"
         try {
+            BeepMuter.mute(this)
             r.startListening(RecognizerFactory.intent(this, true))
         } catch (e: Exception) {
             listening = false
@@ -194,6 +196,7 @@ class MainActivity : Activity() {
         if (!listening) return
         listening = false
         recognizer?.cancel()
+        BeepMuter.unmuteSoon(this)
         idle()
     }
 
@@ -203,11 +206,15 @@ class MainActivity : Activity() {
     }
 
     private val listener = object : RecognitionListener {
-        override fun onReadyForSpeech(params: Bundle?) { status.text = "Escuchando…" }
+        override fun onReadyForSpeech(params: Bundle?) {
+            status.text = "Escuchando…"
+            BeepMuter.unmuteSoon(this@MainActivity, 500)
+        }
         override fun onBeginningOfSpeech() {}
         override fun onRmsChanged(rmsdB: Float) { orb.setLevel(rmsdB) }
         override fun onBufferReceived(buffer: ByteArray?) {}
         override fun onEndOfSpeech() {
+            BeepMuter.mute(this@MainActivity)
             orb.state = OrbView.State.THINKING
             status.text = "Procesando…"
         }
@@ -215,6 +222,7 @@ class MainActivity : Activity() {
         override fun onError(error: Int) {
             if (!listening) return
             listening = false
+            BeepMuter.unmuteSoon(this@MainActivity)
             when (error) {
                 SpeechRecognizer.ERROR_NO_MATCH, SpeechRecognizer.ERROR_SPEECH_TIMEOUT -> idle("No le he oído. $IDLE_HINT.")
                 SpeechRecognizer.ERROR_NETWORK, SpeechRecognizer.ERROR_NETWORK_TIMEOUT, SpeechRecognizer.ERROR_SERVER ->
@@ -231,6 +239,7 @@ class MainActivity : Activity() {
         override fun onResults(results: Bundle?) {
             if (!listening) return
             listening = false
+            BeepMuter.unmuteSoon(this@MainActivity)
             val text = results?.getStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION)?.firstOrNull()?.trim().orEmpty()
             if (text.isEmpty()) idle("No le he entendido.") else handleInput(text)
         }
@@ -243,6 +252,7 @@ class MainActivity : Activity() {
             if (listening && Commands.instant(t) != null) {
                 listening = false
                 recognizer?.cancel()
+                BeepMuter.unmuteSoon(this@MainActivity)
                 handleInput(t)
             }
         }

@@ -76,6 +76,7 @@ class WakeWordService : Service() {
                     screenOff = true
                     recognizer?.cancel()
                     listening = false
+                    BeepMuter.unmuteNow(this@WakeWordService)
                     if (!busy) overlay.hide()
                 }
                 Intent.ACTION_SCREEN_ON -> {
@@ -90,6 +91,7 @@ class WakeWordService : Service() {
 
     override fun onCreate() {
         super.onCreate()
+        BeepMuter.restoreAfterCrash(this)
         prefs = Prefs(this)
         speaker = Speaker(this)
         brain = Brain(this)
@@ -128,6 +130,7 @@ class WakeWordService : Service() {
         }
         recognizer?.destroy()
         recognizer = null
+        BeepMuter.unmuteNow(this)
         speaker.shutdown()
         overlay.hide()
         super.onDestroy()
@@ -164,6 +167,7 @@ class WakeWordService : Service() {
             if (p) {
                 recognizer?.cancel()
                 listening = false
+                BeepMuter.unmuteNow(this)
                 overlay.hide()
             } else {
                 main.postDelayed({ listen() }, 600)
@@ -175,6 +179,7 @@ class WakeWordService : Service() {
         speaker.stop()
         recognizer?.cancel()
         listening = false
+        BeepMuter.unmuteNow(this)
         busy = false
         awaiting = false
         overlay.hide()
@@ -195,6 +200,7 @@ class WakeWordService : Service() {
         }
         listening = true
         try {
+            BeepMuter.mute(this)
             r.startListening(RecognizerFactory.intent(this, true))
         } catch (e: Exception) {
             recreate(1500)
@@ -209,13 +215,16 @@ class WakeWordService : Service() {
     }
 
     private val listener = object : RecognitionListener {
-        override fun onReadyForSpeech(params: Bundle?) {}
+        override fun onReadyForSpeech(params: Bundle?) {
+            BeepMuter.unmuteSoon(this@WakeWordService, 500)
+        }
         override fun onBeginningOfSpeech() {}
         override fun onRmsChanged(rmsdB: Float) {
             if (overlay.isShown) overlay.setLevel(rmsdB)
         }
         override fun onBufferReceived(buffer: ByteArray?) {}
         override fun onEndOfSpeech() {
+            BeepMuter.mute(this@WakeWordService)
             if (awaiting && overlay.isShown) overlay.show(OrbView.State.THINKING)
         }
         override fun onEvent(eventType: Int, params: Bundle?) {}
@@ -238,6 +247,7 @@ class WakeWordService : Service() {
         override fun onResults(results: Bundle?) {
             if (!listening) return
             listening = false
+            BeepMuter.unmuteSoon(this@WakeWordService)
             if (destroyed || paused) return
             onHeard(results?.getStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION) ?: arrayListOf())
         }
@@ -245,6 +255,7 @@ class WakeWordService : Service() {
         override fun onError(error: Int) {
             if (!listening) return
             listening = false
+            BeepMuter.unmuteSoon(this@WakeWordService)
             if (destroyed || paused) return
             if (awaiting) {
                 awaiting = false
@@ -267,6 +278,7 @@ class WakeWordService : Service() {
         listening = false
         awaiting = false
         recognizer?.cancel()
+        BeepMuter.unmuteSoon(this)
         busy = true
         overlay.show(OrbView.State.THINKING, cmd)
         brain.process(cmd) { reply -> handleReply(cmd, reply) }
