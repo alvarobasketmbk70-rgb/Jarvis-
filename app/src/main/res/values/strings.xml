@@ -1,4 +1,4 @@
 <resources>
-    <string name="app_name">Jarvis</string>
-    <string name="accessibility_desc">Permite a Jarvis pulsar botones, desplazarse, escribir, leer la pantalla y enviar mensajes de WhatsApp cuando usted se lo pide por voz. Jarvis no guarda ni envía a ningún sitio lo que hay en su pantalla salvo cuando le pide que la lea.</string>
+    <string name="app_name">Janus</string>
+    <string name="accessibility_desc">Permite a Janus pulsar botones, desplazarse, escribir, leer la pantalla y enviar mensajes de WhatsApp cuando usted se lo pide por voz. Janus no guarda ni envía a ningún sitio lo que hay en su pantalla salvo cuando le pide que la lea.</string>
 </resources>

@@ -23,8 +23,8 @@ import android.speech.RecognitionListener
 import android.speech.SpeechRecognizer
 
 /**
- * Modo «Oye Jarvis»: escucha en segundo plano mientras la pantalla está encendida y,
- * al oír «Jarvis», muestra el orbe flotante sobre cualquier app y atiende la orden.
+ * Modo «Oye Janus»: escucha en segundo plano mientras la pantalla está encendida y,
+ * al oír «Janus», muestra el orbe flotante sobre cualquier app y atiende la orden.
  */
 class WakeWordService : Service() {
 
@@ -35,7 +35,7 @@ class WakeWordService : Service() {
         const val ACTION_SUMMON = "com.jarvis.asistente.SUMMON"
 
         /**
-         * Invoca a Jarvis al estilo Siri (orbe flotante sobre la app actual). Devuelve false
+         * Invoca a Janus al estilo Siri (orbe flotante sobre la app actual). Devuelve false
          * si no es posible y hay que abrir la app completa.
          */
         fun summon(ctx: Context): Boolean {
@@ -49,13 +49,13 @@ class WakeWordService : Service() {
                 false
             }
         }
-        private val WAKE = Regex("\\b(jarvis|yarvis|jarbis|yarbis|jervis|charvis|harvis|jarviz|chavis)\\b", RegexOption.IGNORE_CASE)
+        private val WAKE = Regex("\\b(janus|yanus|llanus|ianus|yanos|llanos|janos|ianos|yannus|jano)\\b", RegexOption.IGNORE_CASE)
 
         @Volatile
         var instance: WakeWordService? = null
             private set
 
-        /** true mientras la pantalla principal de Jarvis está visible (ella usa el micrófono). */
+        /** true mientras la pantalla principal de Janus está visible (ella usa el micrófono). */
         @Volatile
         var appInForeground = false
 
@@ -157,7 +157,7 @@ class WakeWordService : Service() {
 
     private fun goForeground(): Boolean = try {
         val nm = getSystemService(NotificationManager::class.java)
-        nm.createNotificationChannel(NotificationChannel(CHANNEL, "Escucha de «Oye Jarvis»", NotificationManager.IMPORTANCE_LOW))
+        nm.createNotificationChannel(NotificationChannel(CHANNEL, "Escucha de «Oye Janus»", NotificationManager.IMPORTANCE_LOW))
         val open = PendingIntent.getActivity(
             this, 0, Intent(this, MainActivity::class.java), PendingIntent.FLAG_IMMUTABLE
         )
@@ -166,8 +166,8 @@ class WakeWordService : Service() {
         )
         val n = Notification.Builder(this, CHANNEL)
             .setSmallIcon(R.drawable.ic_stat_jarvis)
-            .setContentTitle("Jarvis está atento")
-            .setContentText("Diga «Oye Jarvis» seguido de una orden")
+            .setContentTitle("Janus está atento")
+            .setContentText("Diga «Oye Janus» seguido de una orden")
             .setContentIntent(open)
             .setOngoing(true)
             .addAction(Notification.Action.Builder(Icon.createWithResource(this, R.drawable.ic_stat_jarvis), "Detener", stop).build())
@@ -194,7 +194,7 @@ class WakeWordService : Service() {
         }
     }
 
-    /** Muestra el orbe y escucha una orden directamente (sin necesidad de decir «Jarvis»). */
+    /** Muestra el orbe y escucha una orden directamente (sin necesidad de decir «Janus»). */
     fun summonNow() {
         main.post {
             if (destroyed) return@post
@@ -272,7 +272,7 @@ class WakeWordService : Service() {
             }
             val m = WAKE.find(t) ?: return
             val rest = t.substring(m.range.last + 1).trim(' ', ',', '.', '!', '?', '¿', '¡')
-            // En cuanto se oye «Jarvis» aparece el orbe, sin esperar al final de la frase.
+            // En cuanto se oye «Janus» aparece el orbe, sin esperar al final de la frase.
             overlay.show(OrbView.State.LISTENING, rest)
             if (rest.isNotEmpty() && Commands.instant(rest) != null) runEarly(rest)
         }

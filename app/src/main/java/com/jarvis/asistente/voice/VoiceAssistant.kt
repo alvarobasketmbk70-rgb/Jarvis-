@@ -13,8 +13,8 @@ import com.jarvis.asistente.MainActivity
 import com.jarvis.asistente.RecognizerFactory
 
 /*
- * Estas clases permiten elegir Jarvis como "Asistente digital" del sistema, de modo que
- * al mantener pulsado el botón de encendido (o el gesto de asistente) se abra Jarvis.
+ * Estas clases permiten elegir Janus como "Asistente digital" del sistema, de modo que
+ * al mantener pulsado el botón de encendido (o el gesto de asistente) se abra Janus.
  */
 
 class JarvisVoiceService : VoiceInteractionService()
@@ -26,7 +26,7 @@ class JarvisSessionService : VoiceInteractionSessionService() {
 class JarvisSession(context: Context) : VoiceInteractionSession(context) {
     override fun onShow(args: Bundle?, showFlags: Int) {
         super.onShow(args, showFlags)
-        // Como Siri: el orbe aparece sobre la app actual en lugar de abrir Jarvis a pantalla completa.
+        // Como Siri: el orbe aparece sobre la app actual en lugar de abrir Janus a pantalla completa.
         val i = Intent(context, com.jarvis.asistente.SummonActivity::class.java)
             .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_NO_ANIMATION)
         try {

@@ -14,7 +14,7 @@ import android.view.accessibility.AccessibilityNodeInfo
 import kotlin.math.abs
 
 /**
- * Permite a Jarvis "ver" y tocar la pantalla: pulsar botones por su texto,
+ * Permite a Janus "ver" y tocar la pantalla: pulsar botones por su texto,
  * desplazarse, escribir, leer y pulsar automáticamente "Enviar" en WhatsApp.
  */
 class JarvisAccessibilityService : AccessibilityService() {
@@ -91,7 +91,7 @@ class JarvisAccessibilityService : AccessibilityService() {
         return out
     }
 
-    /** Ventanas visibles de otras apps (nunca la propia de Jarvis). */
+    /** Ventanas visibles de otras apps (nunca la propia de Janus). */
     private fun roots(): List<AccessibilityNodeInfo> {
         val list = ArrayList<AccessibilityNodeInfo>()
         rootInActiveWindow?.let { list.add(it) }

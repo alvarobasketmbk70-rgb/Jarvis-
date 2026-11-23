@@ -46,7 +46,7 @@ object BeepMuter {
 
     /**
      * Tras un pequeño margen devuelve solo la música. Los sonidos del sistema y de
-     * notificaciones siguen en silencio mientras Jarvis esté escuchando, que es por donde
+     * notificaciones siguen en silencio mientras Janus esté escuchando, que es por donde
      * suele sonar el «bip» del micrófono; se restauran con [unmuteNow].
      */
     fun unmuteSoon(ctx: Context, delayMs: Long = 400) {

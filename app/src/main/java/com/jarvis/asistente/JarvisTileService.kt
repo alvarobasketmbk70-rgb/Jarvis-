@@ -5,7 +5,7 @@ import android.content.Intent
 import android.os.Build
 import android.service.quicksettings.TileService
 
-/** Botón «Jarvis» en los ajustes rápidos: abre Jarvis ya escuchando. */
+/** Botón «Janus» en los ajustes rápidos: abre Janus ya escuchando. */
 class JarvisTileService : TileService() {
     override fun onClick() {
         super.onClick()

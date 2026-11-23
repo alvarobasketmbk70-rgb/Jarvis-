@@ -17,7 +17,7 @@ import kotlin.math.min
 import kotlin.math.sin
 
 /**
- * El "núcleo" de Jarvis: una estrella dorada con rayos, polvo de partículas, una membrana
+ * El "núcleo" de Janus: una estrella dorada con rayos, polvo de partículas, una membrana
  * que ondula y un anillo exterior de pulsos que reacciona a la voz.
  */
 class OrbView(context: Context) : View(context) {

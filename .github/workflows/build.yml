@@ -1,4 +1,4 @@
-name: Compilar APK de Jarvis
+name: Compilar APK de JANUS
 
 on:
   push:
@@ -27,13 +27,13 @@ jobs:
 
       - uses: actions/upload-artifact@v4
         with:
-          name: Jarvis-APK
+          name: JANUS-APK
           path: app/build/outputs/apk/debug/app-debug.apk
 
       - name: Publicar APK para descargar
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          cp app/build/outputs/apk/debug/app-debug.apk Jarvis.apk
+          cp app/build/outputs/apk/debug/app-debug.apk JANUS.apk
           gh release delete ultima --yes --cleanup-tag || true
-          gh release create ultima Jarvis.apk --title "Jarvis (última versión)" --notes "Descargue Jarvis.apk e instálelo en el móvil."
+          gh release create ultima JANUS.apk --title "JANUS (última versión)" --notes "Descargue JANUS.apk e instálelo en el móvil."

@@ -57,25 +57,25 @@ class SettingsActivity : Activity() {
             addView(col)
         }
 
-        col.addView(text("Ajustes de Jarvis", 24f, accent))
+        col.addView(text("Ajustes de Janus", 24f, accent))
 
         col.addView(header("Cerebro (inteligencia artificial)"))
-        col.addView(note("Los comandos básicos funcionan sin esto. Para conversar libremente, Jarvis usa una IA en la nube: pegue una clave gratuita de Google Gemini (aistudio.google.com/apikey) o una de Claude (empieza por sk-ant-)."))
+        col.addView(note("Los comandos básicos funcionan sin esto. Para conversar libremente, Janus usa una IA en la nube: pegue una clave gratuita de Google Gemini (aistudio.google.com/apikey) o una de Claude (empieza por sk-ant-)."))
         etKey = makeField("Clave de API", prefs.apiKey, secret = true); col.addView(etKey)
         etModel = makeField("Modelo (vacío = automático)", prefs.model); col.addView(etModel)
 
         col.addView(header("Personalización"))
         etName = makeField("¿Cómo quiere que le llame? (señor, Tony…)", if (prefs.userName == "señor") "" else prefs.userName); col.addView(etName)
         etCc = makeField("Prefijo de país para WhatsApp (34 = España)", prefs.countryCode, number = true); col.addView(etCc)
-        col.addView(header("Voz de Jarvis"))
-        col.addView(note("Jarvis tiene una única voz, diseñada al estilo del asistente de la película. Necesita la clave de Gemini e internet; sin ellas habla con la voz básica del móvil."))
+        col.addView(header("Voz de Janus"))
+        col.addView(note("Janus tiene una única voz, diseñada al estilo del asistente de la película. Necesita la clave de Gemini e internet; sin ellas habla con la voz básica del móvil."))
         col.addView(button("Probar voz") { testVoice() })
         swConv = switch("Modo conversación: sigue escuchando después de responder", prefs.conversationMode); col.addView(swConv)
         swWa = switch("Enviar WhatsApp automáticamente (requiere accesibilidad)", prefs.autoSendWhatsApp); col.addView(swWa)
-        swWake = switch("Responder a «Oye Jarvis» con la app cerrada (con la pantalla encendida; gasta algo de batería)", prefs.wakeWord); col.addView(swWake)
+        swWake = switch("Responder a «Oye Janus» con la app cerrada (con la pantalla encendida; gasta algo de batería)", prefs.wakeWord); col.addView(swWake)
         swWake.setOnCheckedChangeListener { _, on ->
             if (on && checkSelfPermission(Manifest.permission.RECORD_AUDIO) != PackageManager.PERMISSION_GRANTED) {
-                toast("Primero conceda el permiso de micrófono abriendo Jarvis.")
+                toast("Primero conceda el permiso de micrófono abriendo Janus.")
                 swWake.isChecked = false
                 return@setOnCheckedChangeListener
             }
@@ -88,15 +88,15 @@ class SettingsActivity : Activity() {
         col.addView(button("1. Info de la app → ⋮ → Permitir ajustes restringidos") { openAppDetails() })
         col.addView(button("2. Activar servicio de accesibilidad") {
             open(Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS))
-            toast("Busque «Jarvis» (en Aplicaciones descargadas) y actívelo.")
+            toast("Busque «Janus» (en Aplicaciones descargadas) y actívelo.")
         })
         col.addView(button("3. Mostrar sobre otras apps") {
             open(Intent(Settings.ACTION_MANAGE_OVERLAY_PERMISSION, Uri.parse("package:$packageName")))
         })
         col.addView(button("4. Otros permisos Xiaomi (ventanas en segundo plano)") { openMiuiPerms() })
         col.addView(button("5. Sin restricciones de batería") { requestBattery() })
-        col.addView(button("6. Poner Jarvis como asistente predeterminado") { openDefaultAssistant() })
-        col.addView(note("Con el paso 6, al mantener pulsado el botón de encendido (o deslizar desde una esquina inferior) se abrirá Jarvis escuchando. También puede añadir el botón «Jarvis» en los ajustes rápidos."))
+        col.addView(button("6. Poner Janus como asistente predeterminado") { openDefaultAssistant() })
+        col.addView(note("Con el paso 6, al mantener pulsado el botón de encendido (o deslizar desde una esquina inferior) se abrirá Janus escuchando. También puede añadir el botón «Janus» en los ajustes rápidos."))
 
         setContentView(sv)
     }
@@ -174,7 +174,7 @@ class SettingsActivity : Activity() {
         val ok = open(Intent(Settings.ACTION_MANAGE_DEFAULT_APPS_SETTINGS)) ||
             open(Intent(Settings.ACTION_VOICE_INPUT_SETTINGS)) ||
             open(Intent(Settings.ACTION_SETTINGS))
-        if (ok) toast("Entre en «Asistente digital» o «App de asistencia» y elija Jarvis.")
+        if (ok) toast("Entre en «Asistente digital» o «App de asistencia» y elija Janus.")
     }
 
     // ---------- Widgets ----------

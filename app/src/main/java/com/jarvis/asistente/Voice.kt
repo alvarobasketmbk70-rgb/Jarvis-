@@ -32,7 +32,7 @@ import kotlin.math.max
 import kotlin.math.sin
 
 /**
- * Voz de Jarvis. Usa la voz neuronal de Gemini en streaming (empieza a sonar en cuanto llega
+ * Voz de Janus. Usa la voz neuronal de Gemini en streaming (empieza a sonar en cuanto llega
  * el primer trozo de audio) con caché en disco; si falla, cae a la voz del sistema.
  */
 class Speaker(context: Context, private val onReady: (() -> Unit)? = null) : TextToSpeech.OnInitListener {
@@ -133,7 +133,9 @@ class Speaker(context: Context, private val onReady: (() -> Unit)? = null) : Tex
 
     fun speak(text: String, done: (() -> Unit)? = null) {
         BeepMuter.unmuteNow(appCtx)
-        val clean = text.replace(Regex("[*#_`]"), "").trim()
+        val clean = text.replace(Regex("[*#_`]"), "")
+            .replace(Regex("J\\.?A\\.?N\\.?U\\.?S\\.?|\\bjanus\\b", RegexOption.IGNORE_CASE), "Yanus")
+            .trim()
         if (clean.isEmpty()) {
             if (done != null) main.post { done() }
             return
@@ -340,7 +342,7 @@ class AiVoiceFx(private val rate: Int) {
 object NeuralVoice {
     const val SAMPLE_RATE = 24000
     val VOICES = listOf(
-        "Iapetus" to "Iapetus — nítida y refinada (la más parecida al Jarvis de la película)",
+        "Iapetus" to "Iapetus — nítida y refinada (la voz de JANUS)",
         "Charon" to "Charon — grave y serena",
         "Orus" to "Orus — firme y segura",
         "Algenib" to "Algenib — rasgada, madura",
@@ -353,7 +355,7 @@ object NeuralVoice {
         "Aoede" to "Aoede — femenina, suave"
     )
     private const val STYLE =
-        "Eres J.A.R.V.I.S., una inteligencia artificial mayordomo de película de superhéroes. Voz masculina de tono medio, nítida, refinada y extremadamente serena, con aire de mayordomo inglés culto. Habla con precisión casi digital, con fluidez y buen ritmo, cortés y con un humor seco muy sutil. Nunca exagera las emociones. Español de España."
+        "Eres JANUS, una inteligencia artificial con aire de mayordomo digital de película. Voz masculina de tono medio, nítida, refinada y extremadamente serena, con aire de mayordomo inglés culto. Habla con precisión casi digital, con fluidez y buen ritmo, cortés y con un humor seco muy sutil. Nunca exagera las emociones. Español de España."
     private val MODELS = listOf("gemini-3.8-flash-tts", "gemini-3.1-flash-tts-preview")
     private val memory = object : LinkedHashMap<String, ByteArray>(48, 0.75f, true) {
         override fun removeEldestEntry(eldest: MutableMap.MutableEntry<String, ByteArray>?): Boolean = size > 40
@@ -510,7 +512,7 @@ object NeuralVoice {
     }
 }
 
-/** Crea el reconocedor de voz, usando siempre el de Google (nunca el propio de Jarvis). */
+/** Crea el reconocedor de voz, usando siempre el de Google (nunca el propio de Janus). */
 object RecognizerFactory {
     fun findService(ctx: Context): ComponentName? {
         val list = ctx.packageManager.queryIntentServices(Intent(RecognitionService.SERVICE_INTERFACE), 0)

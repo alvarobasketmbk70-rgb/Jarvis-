@@ -11,7 +11,7 @@ import android.view.WindowManager
 import android.widget.LinearLayout
 import android.widget.TextView
 
-/** Orbe flotante que aparece sobre cualquier app al decir «Oye Jarvis» (estilo Siri). */
+/** Orbe flotante que aparece sobre cualquier app al decir «Oye Janus» (estilo Siri). */
 class OverlayOrb(private val ctx: Context) {
     private val wm = ctx.getSystemService(WindowManager::class.java)
     private var root: LinearLayout? = null
@@ -35,7 +35,7 @@ class OverlayOrb(private val ctx: Context) {
         label?.text = when (state) {
             OrbView.State.LISTENING -> "ESCUCHANDO"
             OrbView.State.THINKING -> "PROCESANDO"
-            OrbView.State.SPEAKING -> "J.A.R.V.I.S."
+            OrbView.State.SPEAKING -> "J.A.N.U.S."
             OrbView.State.IDLE -> ""
         }
         if (message != null) setText(message)

@@ -43,7 +43,7 @@ class ActionExecutor(context: Context) {
     fun execute(a: Action): ExecResult = try {
         run(a)
     } catch (e: SecurityException) {
-        ExecResult(false, "Me falta un permiso para hacer eso. Revise los permisos de Jarvis en ajustes.")
+        ExecResult(false, "Me falta un permiso para hacer eso. Revise los permisos de Janus en ajustes.")
     } catch (e: Exception) {
         ExecResult(false, "Ha ocurrido un error: ${e.message ?: "desconocido"}.")
     }
@@ -183,7 +183,7 @@ class ActionExecutor(context: Context) {
         val i = Intent(AlarmClock.ACTION_SET_ALARM)
             .putExtra(AlarmClock.EXTRA_HOUR, h)
             .putExtra(AlarmClock.EXTRA_MINUTES, m)
-            .putExtra(AlarmClock.EXTRA_MESSAGE, "Jarvis")
+            .putExtra(AlarmClock.EXTRA_MESSAGE, "Janus")
             .putExtra(AlarmClock.EXTRA_SKIP_UI, true)
         if (!start(i)) return ExecResult(false, "No encuentro la app de reloj.")
         return ExecResult(true, String.format(ES, "Alarma puesta a las %d:%02d.", h, m))
@@ -193,7 +193,7 @@ class ActionExecutor(context: Context) {
         if (seconds <= 0) return ExecResult(false, "¿De cuánto tiempo pongo el temporizador?")
         val i = Intent(AlarmClock.ACTION_SET_TIMER)
             .putExtra(AlarmClock.EXTRA_LENGTH, seconds)
-            .putExtra(AlarmClock.EXTRA_MESSAGE, "Jarvis")
+            .putExtra(AlarmClock.EXTRA_MESSAGE, "Janus")
             .putExtra(AlarmClock.EXTRA_SKIP_UI, true)
         if (!start(i)) return ExecResult(false, "No encuentro la app de reloj.")
         return ExecResult(true, "Temporizador de ${describe(seconds)} en marcha.")
@@ -286,7 +286,7 @@ class ActionExecutor(context: Context) {
     // ---------- Pantalla ----------
     private fun screen(a: Action): ExecResult {
         val svc = JarvisAccessibilityService.instance
-            ?: return ExecResult(false, "Para controlar la pantalla necesito que active el servicio de accesibilidad de Jarvis. Lo tiene en mis ajustes.")
+            ?: return ExecResult(false, "Para controlar la pantalla necesito que active el servicio de accesibilidad de Janus. Lo tiene en mis ajustes.")
         return when (a.type) {
             "click" -> if (svc.clickText(a.arg("text"))) ExecResult(true, "")
             else ExecResult(false, "No encuentro «${a.arg("text")}» en la pantalla.")

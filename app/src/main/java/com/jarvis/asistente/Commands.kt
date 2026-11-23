@@ -1,6 +1,6 @@
 package com.jarvis.asistente
 
-/** Una acción que Jarvis puede ejecutar en el móvil. */
+/** Una acción que Janus puede ejecutar en el móvil. */
 data class Action(val type: String, val args: Map<String, String> = emptyMap()) {
     fun arg(k: String): String = args[k]?.trim() ?: ""
 }
@@ -27,7 +27,7 @@ class Utt(raw: String) {
             .replace(Regex("\\s+"), " ")
             .trim()
         val prefix = Regex(
-            "^((oye|hola|hey|eh|vale)\\s+)?((jarvis|yarvis|jarbis|yarbis|jervis|charvis)\\s+)?" +
+            "^((oye|hola|hey|eh|vale)\\s+)?((janus|yanus|llanus|ianus|yanos|llanos|janos|ianos|yannus|jano)\\s+)?" +
                 "((por favor|porfa|puedes|podr[ií]as|me puedes|me podr[ií]as|quiero que|necesito que)\\s+)*"
         )
         s = s.replaceFirst(prefix, "")
@@ -43,9 +43,9 @@ class Utt(raw: String) {
 }
 
 object Commands {
-    private val WAKE_ONLY = Regex("^(oye |hola |hey )?(jarvis|yarvis|jarbis|yarbis|jervis|charvis)$")
+    private val WAKE_ONLY = Regex("^(oye |hola |hey )?(janus|yanus|llanus|ianus|yanos|llanos|janos|ianos|yannus|jano)$")
     private val CANCEL = Regex("^(no|nada|nada mas|cancela|cancelar|cancelalo|olvidalo|dejalo|da igual|no importa|eso es todo|adios|hasta luego|nada gracias|no gracias)$")
-    private val THANKS = Regex("^(gracias|muchas gracias|gracias jarvis|genial gracias|perfecto gracias|perfecto|genial)$")
+    private val THANKS = Regex("^(gracias|muchas gracias|gracias (janus|yanus|llanus)|genial gracias|perfecto gracias|perfecto|genial)$")
     private val SHUT = Regex("^(callate|calla|silencio|para de hablar|basta|cierra el pico)$")
     private val REPEAT = Regex("^(repite|repitelo|repite eso|que has dicho|puedes repetir|como dices)$")
 
@@ -79,7 +79,7 @@ object Commands {
         if (THANKS.matches(p)) return Parse.Say("Es un placer.")
         if (SHUT.matches(p)) return act("shutup")
         if (REPEAT.matches(p)) return act("repeat")
-        if (Regex("(ajustes|configuracion|opciones) de jarvis|configurar? jarvis").containsMatchIn(p)) return act("jarvis_settings")
+        if (Regex("(ajustes|configuracion|opciones) de (janus|yanus|llanus)|configurar? (janus|yanus|llanus)").containsMatchIn(p)) return act("jarvis_settings")
 
         parseMessage(u)?.let { return it }
         parseCall(u)?.let { return it }

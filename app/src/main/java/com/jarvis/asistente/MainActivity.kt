@@ -69,7 +69,7 @@ class MainActivity : Activity() {
         }
         if (prefs.wakeWord && hasMic()) WakeWordService.start(this)
         if (prefs.wakeWord && !android.provider.Settings.canDrawOverlays(this)) {
-            addBubble("Para que aparezca sobre cualquier app al decir «Oye Jarvis», toque aquí y active «Mostrar sobre otras apps» para Jarvis.", false)
+            addBubble("Para que aparezca sobre cualquier app al decir «Oye Janus», toque aquí y active «Mostrar sobre otras apps» para Janus.", false)
                 .setOnClickListener {
                     try {
                         startActivity(Intent(android.provider.Settings.ACTION_MANAGE_OVERLAY_PERMISSION, android.net.Uri.parse("package:$packageName")))
@@ -281,7 +281,7 @@ class MainActivity : Activity() {
             return
         }
         if (action.type in ActionExecutor.SCREEN_TYPES) {
-            // Las órdenes de pantalla actúan sobre la app de detrás: Jarvis se aparta primero.
+            // Las órdenes de pantalla actúan sobre la app de detrás: Janus se aparta primero.
             status.text = "Ejecutando…"
             moveTaskToBack(true)
             main.postDelayed({
@@ -352,7 +352,7 @@ class MainActivity : Activity() {
             gravity = Gravity.CENTER_VERTICAL
         }
         val title = TextView(this).apply {
-            text = "J.A.R.V.I.S."
+            text = "J.A.N.U.S."
             setTextColor(ACCENT)
             textSize = 22f
             typeface = Typeface.create("sans-serif-light", Typeface.BOLD)

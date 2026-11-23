@@ -5,7 +5,7 @@ import android.content.Intent
 import android.os.Bundle
 
 /**
- * Pantalla invisible que solo hace de puente: invoca el orbe flotante de Jarvis sobre la
+ * Pantalla invisible que solo hace de puente: invoca el orbe flotante de Janus sobre la
  * app actual (estilo Siri) y se cierra al momento. Si no hay permiso de superposición,
  * abre la app completa.
  */

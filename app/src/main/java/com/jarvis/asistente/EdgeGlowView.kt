@@ -9,7 +9,7 @@ import android.graphics.SweepGradient
 import android.view.View
 import kotlin.math.sin
 
-/** Brillo dorado que recorre los bordes de la pantalla mientras Jarvis atiende (como Siri). */
+/** Brillo dorado que recorre los bordes de la pantalla mientras Janus atiende (como Siri). */
 class EdgeGlowView(context: Context) : View(context) {
     private var level = 0f
     private var target = 0f
