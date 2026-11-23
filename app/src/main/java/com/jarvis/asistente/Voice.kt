@@ -8,6 +8,7 @@ import android.media.AudioFocusRequest
 import android.media.AudioFormat
 import android.media.AudioManager
 import android.media.AudioTrack
+import android.media.PlaybackParams
 import android.os.Handler
 import android.os.Looper
 import android.speech.RecognitionService
@@ -28,6 +29,7 @@ import java.util.Locale
 import java.util.UUID
 import java.util.concurrent.ConcurrentHashMap
 import kotlin.math.max
+import kotlin.math.sin
 
 /**
  * Voz de Jarvis. Usa la voz neuronal de Gemini en streaming (empieza a sonar en cuanto llega
@@ -186,6 +188,7 @@ class Speaker(context: Context, private val onReady: (() -> Unit)? = null) : Tex
         private var track: AudioTrack? = null
         private val all = ByteArrayOutputStream()
         private var carry: Byte? = null
+        private val fx: AiVoiceFx? = if (prefs.aiEffect) AiVoiceFx(NeuralVoice.SAMPLE_RATE) else null
         var bytes = 0
             private set
 
@@ -204,7 +207,13 @@ class Speaker(context: Context, private val onReady: (() -> Unit)? = null) : Tex
                 .setTransferMode(AudioTrack.MODE_STREAM)
                 .setBufferSizeInBytes(max(minBuf, 8192))
                 .build()
-                .also { it.play() }
+                .also { t ->
+                    val pitch = prefs.voicePitch
+                    if (pitch in 0.5f..1.5f && pitch != 1f) {
+                        try { t.playbackParams = PlaybackParams().setPitch(pitch).setSpeed(1f) } catch (_: Exception) {}
+                    }
+                    t.play()
+                }
         } catch (e: Exception) {
             null
         }
@@ -220,6 +229,7 @@ class Speaker(context: Context, private val onReady: (() -> Unit)? = null) : Tex
             if (data.isEmpty()) return
             val t = track ?: open()?.also { track = it } ?: return
             all.write(data, 0, data.size)
+            fx?.let { data = it.apply(data) }
             var off = 0
             while (off < data.size && gen == generation) {
                 val n = t.write(data, off, data.size - off)
@@ -272,6 +282,50 @@ class Speaker(context: Context, private val onReady: (() -> Unit)? = null) : Tex
         } catch (_: Exception) {
         }
         am.abandonAudioFocusRequest(focus)
+    }
+}
+
+/**
+ * Efecto «voz de IA»: un coro muy corto y un eco metálico mínimo que dan el timbre digital
+ * característico del asistente de la película, sin que deje de sonar natural.
+ */
+class AiVoiceFx(private val rate: Int) {
+    private val line = FloatArray((rate * 0.05).toInt() + 4)
+    private var w = 0
+    private var n = 0L
+    private val comb = FloatArray((rate * 0.027).toInt())
+    private var ci = 0
+    private var lp = 0f
+
+    private fun sample(x: Float): Float {
+        line[w] = x
+        val delay = rate * (0.012f + 0.0025f * sin(2.0 * Math.PI * 0.35 * n / rate).toFloat())
+        var rp = w - delay
+        while (rp < 0) rp += line.size
+        val i0 = rp.toInt() % line.size
+        val i1 = (i0 + 1) % line.size
+        val frac = rp - rp.toInt()
+        val chorus = line[i0] * (1 - frac) + line[i1] * frac
+        val c = comb[ci]
+        comb[ci] = x + c * 0.28f
+        ci = (ci + 1) % comb.size
+        w = (w + 1) % line.size
+        n++
+        lp += (c - lp) * 0.35f // suaviza el eco para que no chirríe
+        return (x * 0.82f + chorus * 0.30f + lp * 0.16f).coerceIn(-1f, 1f)
+    }
+
+    fun apply(pcm: ByteArray): ByteArray {
+        val out = ByteArray(pcm.size)
+        var i = 0
+        while (i + 1 < pcm.size) {
+            val s = ((pcm[i + 1].toInt() shl 8) or (pcm[i].toInt() and 0xFF)).toShort()
+            val y = (sample(s / 32768f) * 32767f).toInt()
+            out[i] = (y and 0xFF).toByte()
+            out[i + 1] = ((y shr 8) and 0xFF).toByte()
+            i += 2
+        }
+        return out
     }
 }
 

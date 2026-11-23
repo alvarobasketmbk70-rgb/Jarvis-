@@ -43,6 +43,12 @@ class Prefs(context: Context) {
     var neuralVoiceName: String
         get() = (sp.getString("neural_voice_name", "") ?: "").ifBlank { "Iapetus" }
         set(v) = sp.edit().putString("neural_voice_name", v).apply()
+    var aiEffect: Boolean
+        get() = sp.getBoolean("ai_effect", true)
+        set(v) = sp.edit().putBoolean("ai_effect", v).apply()
+    var voicePitch: Float
+        get() = sp.getFloat("voice_pitch", 0.94f)
+        set(v) = sp.edit().putFloat("voice_pitch", v).apply()
     var wakeWord: Boolean
         get() = sp.getBoolean("wake_word", true)
         set(v) = sp.edit().putBoolean("wake_word", v).apply()

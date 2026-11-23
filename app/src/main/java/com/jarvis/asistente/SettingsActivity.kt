@@ -21,6 +21,7 @@ import android.widget.Spinner
 import android.widget.Switch
 import android.widget.TextView
 import android.widget.Toast
+import kotlin.math.abs
 
 class SettingsActivity : Activity() {
     private val bg = 0xFF020B14.toInt()
@@ -37,6 +38,9 @@ class SettingsActivity : Activity() {
     private lateinit var spVoice: Spinner
     private lateinit var spNeural: Spinner
     private lateinit var swNeural: Switch
+    private lateinit var swFx: Switch
+    private lateinit var spPitch: Spinner
+    private val pitches = listOf(1.0f to "Tono normal", 0.94f to "Algo más grave (recomendado)", 0.88f to "Grave", 0.82f to "Muy grave")
     private var speaker: Speaker? = null
     private lateinit var tvAcc: TextView
     private var tts: TextToSpeech? = null
@@ -72,6 +76,12 @@ class SettingsActivity : Activity() {
         spNeural.adapter = ArrayAdapter(this, android.R.layout.simple_spinner_dropdown_item, NeuralVoice.VOICES.map { it.second })
         spNeural.setSelection(NeuralVoice.VOICES.indexOfFirst { it.first == prefs.neuralVoiceName }.coerceAtLeast(0))
         col.addView(spNeural)
+        swFx = switch("Efecto de voz de IA (timbre digital, como en la película)", prefs.aiEffect); col.addView(swFx)
+        col.addView(note("Tono de la voz"))
+        spPitch = Spinner(this)
+        spPitch.adapter = ArrayAdapter(this, android.R.layout.simple_spinner_dropdown_item, pitches.map { it.second })
+        spPitch.setSelection(pitches.indexOfFirst { abs(it.first - prefs.voicePitch) < 0.01f }.coerceAtLeast(0))
+        col.addView(spPitch)
         col.addView(note("Voz del sistema (se usa sin internet o sin clave de Gemini)"))
         spVoice = Spinner(this); col.addView(spVoice)
         col.addView(button("Probar voz") { testVoice() })
@@ -133,6 +143,8 @@ class SettingsActivity : Activity() {
         prefs.autoSendWhatsApp = swWa.isChecked
         prefs.voiceName = voiceIds.getOrElse(spVoice.selectedItemPosition) { "" }
         prefs.neuralVoice = swNeural.isChecked
+        prefs.aiEffect = swFx.isChecked
+        prefs.voicePitch = pitches.getOrElse(spPitch.selectedItemPosition) { pitches[1] }.first
         prefs.neuralVoiceName = NeuralVoice.VOICES.getOrElse(spNeural.selectedItemPosition) { NeuralVoice.VOICES[0] }.first
     }
 
