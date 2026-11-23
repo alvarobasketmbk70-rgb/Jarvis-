@@ -35,7 +35,6 @@ class SettingsActivity : Activity() {
     private lateinit var swConv: Switch
     private lateinit var swWa: Switch
     private lateinit var swWake: Switch
-    private lateinit var spVoice: Spinner
     private lateinit var spNeural: Spinner
     private lateinit var swNeural: Switch
     private lateinit var swFx: Switch
@@ -44,7 +43,6 @@ class SettingsActivity : Activity() {
     private var speaker: Speaker? = null
     private lateinit var tvAcc: TextView
     private var tts: TextToSpeech? = null
-    private var voiceIds: List<String> = listOf("")
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -70,20 +68,7 @@ class SettingsActivity : Activity() {
         etName = makeField("¿Cómo quiere que le llame? (señor, Tony…)", if (prefs.userName == "señor") "" else prefs.userName); col.addView(etName)
         etCc = makeField("Prefijo de país para WhatsApp (34 = España)", prefs.countryCode, number = true); col.addView(etCc)
         col.addView(header("Voz de Jarvis"))
-        swNeural = switch("Voz neuronal de Gemini (mucho más natural; usa la clave de Gemini e internet)", prefs.neuralVoice); col.addView(swNeural)
-        col.addView(note("Voz neuronal"))
-        spNeural = Spinner(this)
-        spNeural.adapter = ArrayAdapter(this, android.R.layout.simple_spinner_dropdown_item, NeuralVoice.VOICES.map { it.second })
-        spNeural.setSelection(NeuralVoice.VOICES.indexOfFirst { it.first == prefs.neuralVoiceName }.coerceAtLeast(0))
-        col.addView(spNeural)
-        swFx = switch("Efecto de voz de IA (timbre digital, como en la película)", prefs.aiEffect); col.addView(swFx)
-        col.addView(note("Tono de la voz"))
-        spPitch = Spinner(this)
-        spPitch.adapter = ArrayAdapter(this, android.R.layout.simple_spinner_dropdown_item, pitches.map { it.second })
-        spPitch.setSelection(pitches.indexOfFirst { abs(it.first - prefs.voicePitch) < 0.01f }.coerceAtLeast(0))
-        col.addView(spPitch)
-        col.addView(note("Voz del sistema (se usa sin internet o sin clave de Gemini)"))
-        spVoice = Spinner(this); col.addView(spVoice)
+        col.addView(note("Jarvis tiene una única voz, diseñada al estilo del asistente de la película. Necesita la clave de Gemini e internet; sin ellas habla con la voz básica del móvil."))
         col.addView(button("Probar voz") { testVoice() })
         swConv = switch("Modo conversación: sigue escuchando después de responder", prefs.conversationMode); col.addView(swConv)
         swWa = switch("Enviar WhatsApp automáticamente (requiere accesibilidad)", prefs.autoSendWhatsApp); col.addView(swWa)
@@ -114,7 +99,6 @@ class SettingsActivity : Activity() {
         col.addView(note("Con el paso 6, al mantener pulsado el botón de encendido (o deslizar desde una esquina inferior) se abrirá Jarvis escuchando. También puede añadir el botón «Jarvis» en los ajustes rápidos."))
 
         setContentView(sv)
-        loadVoices()
     }
 
     override fun onResume() {
@@ -141,36 +125,9 @@ class SettingsActivity : Activity() {
         prefs.countryCode = etCc.text.toString()
         prefs.conversationMode = swConv.isChecked
         prefs.autoSendWhatsApp = swWa.isChecked
-        prefs.voiceName = voiceIds.getOrElse(spVoice.selectedItemPosition) { "" }
-        prefs.neuralVoice = swNeural.isChecked
-        prefs.aiEffect = swFx.isChecked
-        prefs.voicePitch = pitches.getOrElse(spPitch.selectedItemPosition) { pitches[1] }.first
-        prefs.neuralVoiceName = NeuralVoice.VOICES.getOrElse(spNeural.selectedItemPosition) { NeuralVoice.VOICES[0] }.first
     }
 
-    // ---------- Voces ----------
-    private fun loadVoices() {
-        tts = TextToSpeech(this) { status ->
-            if (status == TextToSpeech.SUCCESS) {
-                val voices: List<Voice> = try {
-                    tts?.voices?.filter { it.locale.language == "es" }
-                        ?.sortedWith(compareBy<Voice>({ it.locale.country != "ES" }, { it.name }))
-                } catch (e: Exception) {
-                    null
-                } ?: emptyList()
-                runOnUiThread {
-                    voiceIds = listOf("") + voices.map { it.name }
-                    val labels = listOf("Predeterminada del sistema") + voices.map { v ->
-                        v.name + (if (v.isNetworkConnectionRequired) " (online)" else "")
-                    }
-                    spVoice.adapter = ArrayAdapter(this, android.R.layout.simple_spinner_dropdown_item, labels)
-                    val idx = voiceIds.indexOf(prefs.voiceName)
-                    if (idx >= 0) spVoice.setSelection(idx)
-                }
-            }
-        }
-    }
-
+    // ---------- Voz ----------
     private fun testVoice() {
         save()
         val sp = speaker ?: Speaker(this).also { speaker = it }

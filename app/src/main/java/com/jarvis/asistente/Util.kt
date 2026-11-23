@@ -29,7 +29,7 @@ class Prefs(context: Context) {
         get() = (sp.getString("country_code", "") ?: "").ifBlank { "34" }
         set(v) = sp.edit().putString("country_code", v.filter { it.isDigit() }).apply()
     var voiceName: String
-        get() = sp.getString("voice", "") ?: ""
+        get() = ""
         set(v) = sp.edit().putString("voice", v).apply()
     var conversationMode: Boolean
         get() = sp.getBoolean("conversation", true)
@@ -38,16 +38,16 @@ class Prefs(context: Context) {
         get() = sp.getBoolean("auto_wa", true)
         set(v) = sp.edit().putBoolean("auto_wa", v).apply()
     var neuralVoice: Boolean
-        get() = sp.getBoolean("neural_voice", true)
+        get() = true
         set(v) = sp.edit().putBoolean("neural_voice", v).apply()
     var neuralVoiceName: String
-        get() = (sp.getString("neural_voice_name", "") ?: "").ifBlank { "Iapetus" }
+        get() = "Iapetus"
         set(v) = sp.edit().putString("neural_voice_name", v).apply()
     var aiEffect: Boolean
-        get() = sp.getBoolean("ai_effect", true)
+        get() = true
         set(v) = sp.edit().putBoolean("ai_effect", v).apply()
     var voicePitch: Float
-        get() = sp.getFloat("voice_pitch", 0.94f)
+        get() = 0.94f
         set(v) = sp.edit().putFloat("voice_pitch", v).apply()
     var wakeWord: Boolean
         get() = sp.getBoolean("wake_word", true)

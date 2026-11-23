@@ -84,7 +84,7 @@ class Speaker(context: Context, private val onReady: (() -> Unit)? = null) : Tex
             val r = tts.setLanguage(ES)
             if (r == TextToSpeech.LANG_MISSING_DATA || r == TextToSpeech.LANG_NOT_SUPPORTED) tts.setLanguage(Locale("es"))
             tts.setSpeechRate(1.08f)
-            tts.setPitch(0.92f)
+            tts.setPitch(0.85f)
             tts.setAudioAttributes(attrs)
             tts.setOnUtteranceProgressListener(object : UtteranceProgressListener() {
                 override fun onStart(utteranceId: String?) {}
@@ -113,6 +113,12 @@ class Speaker(context: Context, private val onReady: (() -> Unit)? = null) : Tex
         try {
             if (wanted.isBlank()) {
                 tts.setLanguage(ES)
+                // Voz de respaldo: masculina y de España si el móvil tiene alguna.
+                val male = tts.voices?.filter { v ->
+                    v.locale.language == "es" && !v.isNetworkConnectionRequired &&
+                        v.name.contains("male", ignoreCase = true) && !v.name.contains("female", ignoreCase = true)
+                }?.sortedBy { if (it.locale.country == "ES") 0 else 1 }?.firstOrNull()
+                if (male != null) tts.setVoice(male)
             } else {
                 tts.voices?.firstOrNull { it.name == wanted }?.let { tts.setVoice(it) }
             }
