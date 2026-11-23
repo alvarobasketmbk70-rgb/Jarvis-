@@ -216,7 +216,7 @@ class WakeWordService : Service() {
 
     private val listener = object : RecognitionListener {
         override fun onReadyForSpeech(params: Bundle?) {
-            BeepMuter.unmuteSoon(this@WakeWordService, 500)
+            BeepMuter.unmuteSoon(this@WakeWordService, 800)
         }
         override fun onBeginningOfSpeech() {}
         override fun onRmsChanged(rmsdB: Float) {

@@ -44,13 +44,25 @@ object BeepMuter {
         save(ctx)
     }
 
-    /** Restaura el sonido tras un pequeño margen (para tapar también el «bip» de cierre). */
-    fun unmuteSoon(ctx: Context, delayMs: Long = 350) {
+    /**
+     * Tras un pequeño margen devuelve solo la música. Los sonidos del sistema y de
+     * notificaciones siguen en silencio mientras Jarvis esté escuchando, que es por donde
+     * suele sonar el «bip» del micrófono; se restauran con [unmuteNow].
+     */
+    fun unmuteSoon(ctx: Context, delayMs: Long = 400) {
         unmuteTask?.let { main.removeCallbacks(it) }
         val appCtx = ctx.applicationContext
-        val task = Runnable { unmuteNow(appCtx) }
+        val task = Runnable { unmuteMusic(appCtx) }
         unmuteTask = task
         main.postDelayed(task, delayMs)
+    }
+
+    private fun unmuteMusic(ctx: Context) {
+        unmuteTask = null
+        if (AudioManager.STREAM_MUSIC !in muted) return
+        try { am(ctx).adjustStreamVolume(AudioManager.STREAM_MUSIC, AudioManager.ADJUST_UNMUTE, 0) } catch (_: Exception) {}
+        muted.remove(AudioManager.STREAM_MUSIC)
+        save(ctx)
     }
 
     fun unmuteNow(ctx: Context) {

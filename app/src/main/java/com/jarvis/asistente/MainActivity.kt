@@ -102,6 +102,7 @@ class MainActivity : Activity() {
         resumed = false
         stopListening()
         WakeWordService.appInForeground = false
+        BeepMuter.unmuteNow(this)
         WakeWordService.instance?.setPaused(false)
         super.onPause()
     }
@@ -208,7 +209,7 @@ class MainActivity : Activity() {
     private val listener = object : RecognitionListener {
         override fun onReadyForSpeech(params: Bundle?) {
             status.text = "Escuchando…"
-            BeepMuter.unmuteSoon(this@MainActivity, 500)
+            BeepMuter.unmuteSoon(this@MainActivity, 800)
         }
         override fun onBeginningOfSpeech() {}
         override fun onRmsChanged(rmsdB: Float) { orb.setLevel(rmsdB) }
