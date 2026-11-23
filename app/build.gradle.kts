@@ -14,7 +14,7 @@ android {
         versionCode = 2
         versionName = "2.0"
         ndk {
-            abiFilters += listOf("arm64-v8a", "armeabi-v7a")
+            abiFilters += listOf("arm64-v8a")
         }
     }
 
@@ -31,10 +31,6 @@ android {
     }
     kotlinOptions {
         jvmTarget = "17"
-    }
-    androidResources {
-        // El modelo de voz local se copia tal cual.
-        noCompress += listOf("mdl", "fst", "int", "conf", "mat", "carpa", "onnx")
     }
     lint {
         abortOnError = false
