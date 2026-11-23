@@ -237,7 +237,14 @@ class MainActivity : Activity() {
 
         override fun onPartialResults(partialResults: Bundle?) {
             val t = partialResults?.getStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION)?.firstOrNull()
-            if (!t.isNullOrBlank()) status.text = t
+            if (t.isNullOrBlank()) return
+            status.text = t
+            // Órdenes sencillas («pausa la música», «qué hora es»): se ejecutan sin esperar al final.
+            if (listening && Commands.instant(t) != null) {
+                listening = false
+                recognizer?.cancel()
+                handleInput(t)
+            }
         }
 
         override fun onEvent(eventType: Int, params: Bundle?) {}

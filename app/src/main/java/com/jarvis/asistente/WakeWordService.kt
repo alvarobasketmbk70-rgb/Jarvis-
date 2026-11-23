@@ -221,23 +221,29 @@ class WakeWordService : Service() {
         override fun onEvent(eventType: Int, params: Bundle?) {}
 
         override fun onPartialResults(partialResults: Bundle?) {
+            if (!listening || busy) return
             val t = partialResults?.getStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION)?.firstOrNull() ?: return
             if (awaiting) {
                 if (t.isNotBlank()) overlay.setText(t)
+                if (Commands.instant(t) != null) runEarly(t.trim())
                 return
             }
             val m = WAKE.find(t) ?: return
+            val rest = t.substring(m.range.last + 1).trim(' ', ',', '.', '!', '?', '¿', '¡')
             // En cuanto se oye «Jarvis» aparece el orbe, sin esperar al final de la frase.
-            overlay.show(OrbView.State.LISTENING, t.substring(m.range.last + 1).trim())
+            overlay.show(OrbView.State.LISTENING, rest)
+            if (rest.isNotEmpty() && Commands.instant(rest) != null) runEarly(rest)
         }
 
         override fun onResults(results: Bundle?) {
+            if (!listening) return
             listening = false
             if (destroyed || paused) return
             onHeard(results?.getStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION) ?: arrayListOf())
         }
 
         override fun onError(error: Int) {
+            if (!listening) return
             listening = false
             if (destroyed || paused) return
             if (awaiting) {
@@ -254,6 +260,16 @@ class WakeWordService : Service() {
                 else -> main.postDelayed({ listen() }, 250)
             }
         }
+    }
+
+    /** Ejecuta una orden sencilla nada más reconocerla, cortando la escucha. */
+    private fun runEarly(cmd: String) {
+        listening = false
+        awaiting = false
+        recognizer?.cancel()
+        busy = true
+        overlay.show(OrbView.State.THINKING, cmd)
+        brain.process(cmd) { reply -> handleReply(cmd, reply) }
     }
 
     private fun onHeard(list: List<String>) {

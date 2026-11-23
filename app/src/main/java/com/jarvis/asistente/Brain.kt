@@ -129,7 +129,7 @@ class Brain(context: Context) {
         val name = prefs.userName
         return """
 Eres JARVIS, el asistente de voz personal de $name, inspirado en el mayordomo digital de Iron Man: educado, ingenioso, con un toque de humor seco y muy eficaz. Vives en su móvil Android (Xiaomi).
-Hablas siempre en español de España. Tus respuestas se leen en voz alta: sé breve (1 a 3 frases), natural, sin markdown, sin listas, sin emojis y sin URLs. Trátale de usted y llámale "$name" de vez en cuando.
+Hablas siempre en español de España. Tus respuestas se leen en voz alta y deben ser rápidas, como las de Siri: sé muy breve (normalmente una frase, máximo dos), natural, sin markdown, sin listas, sin emojis y sin URLs. Trátale de usted y llámale "$name" de vez en cuando.
 Fecha y hora actuales: $now.
 
 Responde SIEMPRE con un único objeto JSON, sin texto alrededor, con este formato:
@@ -174,18 +174,58 @@ object LlmClient {
 
     private fun part(text: String) = JSONArray().put(JSONObject().put("text", text))
 
+    @Volatile
+    private var geminiModel: String? = null
+    @Volatile
+    private var thinkingOk = true
+    private val FAST_MODELS = listOf("gemini-3.5-flash-lite", "gemini-flash-lite-latest", "gemini-flash-latest")
+
+    /** Usa el modelo más rápido disponible (Flash-Lite) con el razonamiento al mínimo. */
     private fun gemini(key: String, model: String, system: String, history: List<Pair<String, String>>, user: String): String {
-        val m = model.ifBlank { "gemini-flash-latest" }
+        val models = if (model.isNotBlank()) listOf(model) else geminiModel?.let { listOf(it) } ?: FAST_MODELS
+        var last: Exception? = null
+        for (m in models) {
+            try {
+                val r = geminiCall(key, m, system, history, user, thinkingOk)
+                if (model.isBlank()) geminiModel = m
+                return r
+            } catch (e: HttpError) {
+                last = e
+                if (e.code == 400 && thinkingOk) {
+                    try {
+                        val r = geminiCall(key, m, system, history, user, false)
+                        thinkingOk = false
+                        if (model.isBlank()) geminiModel = m
+                        return r
+                    } catch (e2: HttpError) {
+                        last = e2
+                        if (e2.code != 404) throw e2
+                    }
+                } else if (e.code != 404) {
+                    throw e
+                }
+            }
+        }
+        throw last ?: HttpError(404, "sin modelo")
+    }
+
+    private fun geminiCall(
+        key: String, m: String, system: String, history: List<Pair<String, String>>, user: String, minimalThinking: Boolean
+    ): String {
         val contents = JSONArray()
         for ((u, a) in history) {
             contents.put(JSONObject().put("role", "user").put("parts", part(u)))
             contents.put(JSONObject().put("role", "model").put("parts", part(a)))
         }
         contents.put(JSONObject().put("role", "user").put("parts", part(user)))
+        val gen = JSONObject()
+            .put("responseMimeType", "application/json")
+            .put("maxOutputTokens", 400)
+        if (minimalThinking) gen.put("thinkingConfig", JSONObject().put("thinkingLevel", "minimal"))
         val body = JSONObject()
             .put("systemInstruction", JSONObject().put("parts", part(system)))
             .put("contents", contents)
-            .put("generationConfig", JSONObject().put("responseMimeType", "application/json"))
+            .put("generationConfig", gen)
         val res = post(
             "https://generativelanguage.googleapis.com/v1beta/models/$m:generateContent",
             body.toString(),
@@ -210,7 +250,7 @@ object LlmClient {
         messages.put(JSONObject().put("role", "user").put("content", user))
         val body = JSONObject()
             .put("model", model.ifBlank { "claude-haiku-5-5" })
-            .put("max_tokens", 600)
+            .put("max_tokens", 300)
             .put("system", system)
             .put("messages", messages)
         val res = post(
@@ -231,8 +271,8 @@ object LlmClient {
         val c = URL(url).openConnection() as HttpURLConnection
         try {
             c.requestMethod = "POST"
-            c.connectTimeout = 15000
-            c.readTimeout = 45000
+            c.connectTimeout = 8000
+            c.readTimeout = 25000
             c.doOutput = true
             c.setRequestProperty("Content-Type", "application/json; charset=utf-8")
             for ((k, v) in headers) c.setRequestProperty(k, v)

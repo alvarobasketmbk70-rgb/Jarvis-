@@ -18,17 +18,20 @@ import android.speech.tts.UtteranceProgressListener
 import android.util.Base64
 import org.json.JSONArray
 import org.json.JSONObject
+import java.io.ByteArrayOutputStream
+import java.io.File
 import java.net.HttpURLConnection
 import java.net.URL
+import java.security.MessageDigest
+import java.util.Calendar
 import java.util.Locale
 import java.util.UUID
 import java.util.concurrent.ConcurrentHashMap
 import kotlin.math.max
-import kotlin.math.min
 
 /**
- * Voz de Jarvis. Usa la voz neuronal de Gemini si hay clave de Gemini y está activada;
- * si falla (sin internet, sin clave, límite de uso) cae a la voz del sistema.
+ * Voz de Jarvis. Usa la voz neuronal de Gemini en streaming (empieza a sonar en cuanto llega
+ * el primer trozo de audio) con caché en disco; si falla, cae a la voz del sistema.
  */
 class Speaker(context: Context, private val onReady: (() -> Unit)? = null) : TextToSpeech.OnInitListener {
     private val appCtx = context.applicationContext
@@ -54,11 +57,31 @@ class Speaker(context: Context, private val onReady: (() -> Unit)? = null) : Tex
 
     val isSpeaking: Boolean get() = neuralBusy || (ready && tts.isSpeaking)
 
+    init {
+        NeuralVoice.init(appCtx)
+        neuralKey()?.let { NeuralVoice.prewarm(it, prefs.neuralVoiceName, commonPhrases()) }
+    }
+
+    private fun commonPhrases(): List<String> {
+        val n = prefs.userName
+        val h = Calendar.getInstance().get(Calendar.HOUR_OF_DAY)
+        val saludo = when (h) {
+            in 6..12 -> "Buenos días"
+            in 13..20 -> "Buenas tardes"
+            else -> "Buenas noches"
+        }
+        return listOf(
+            "¿Sí, $n?", "$saludo, $n. ¿En qué puedo ayudarle?", "Música en pausa.", "Reanudando la música.",
+            "Siguiente canción.", "Canción anterior.", "De acuerdo.", "Es un placer.",
+            "Linterna encendida.", "Linterna apagada.", "Volumen subido.", "Volumen bajado."
+        )
+    }
+
     override fun onInit(status: Int) {
         if (status == TextToSpeech.SUCCESS) {
             val r = tts.setLanguage(ES)
             if (r == TextToSpeech.LANG_MISSING_DATA || r == TextToSpeech.LANG_NOT_SUPPORTED) tts.setLanguage(Locale("es"))
-            tts.setSpeechRate(1.05f)
+            tts.setSpeechRate(1.08f)
             tts.setPitch(0.92f)
             tts.setAudioAttributes(attrs)
             tts.setOnUtteranceProgressListener(object : UtteranceProgressListener() {
@@ -108,29 +131,42 @@ class Speaker(context: Context, private val onReady: (() -> Unit)? = null) : Tex
         }
         val gen = ++generation
         val key = neuralKey()
-        if (key != null) {
-            if (ready) tts.stop()
-            neuralBusy = true
-            am.requestAudioFocus(focus)
-            val voice = prefs.neuralVoiceName
-            Thread {
-                val pcm = NeuralVoice.synth(key, voice, clean)
-                if (gen != generation) return@Thread
-                if (pcm == null) {
-                    neuralBusy = false
-                    main.post { if (gen == generation) systemSpeak(clean, done) }
-                    return@Thread
-                }
-                play(pcm, gen)
-                if (gen == generation) {
-                    neuralBusy = false
-                    am.abandonAudioFocusRequest(focus)
-                    if (done != null) main.post { done() }
-                }
-            }.start()
+        if (key == null) {
+            systemSpeak(clean, done)
             return
         }
-        systemSpeak(clean, done)
+        if (ready) tts.stop()
+        neuralBusy = true
+        am.requestAudioFocus(focus)
+        val voice = prefs.neuralVoiceName
+        Thread {
+            var played = false
+            val cached = NeuralVoice.cached(voice, clean)
+            if (cached != null) {
+                PcmPlayer(gen).apply { write(cached); finish() }
+                played = true
+            } else {
+                val player = PcmPlayer(gen)
+                val complete = NeuralVoice.stream(key, voice, clean) { chunk ->
+                    if (gen != generation) false else { player.write(chunk); true }
+                }
+                if (player.bytes > 0) {
+                    player.finish()
+                    played = true
+                    if (complete && gen == generation) NeuralVoice.store(voice, clean, player.all())
+                } else {
+                    player.release()
+                }
+            }
+            if (gen != generation) return@Thread
+            neuralBusy = false
+            if (!played) {
+                main.post { if (gen == generation) systemSpeak(clean, done) }
+                return@Thread
+            }
+            am.abandonAudioFocusRequest(focus)
+            if (done != null) main.post { done() }
+        }.start()
     }
 
     private fun systemSpeak(text: String, done: (() -> Unit)?) {
@@ -145,11 +181,17 @@ class Speaker(context: Context, private val onReady: (() -> Unit)? = null) : Tex
         if (tts.speak(text, TextToSpeech.QUEUE_FLUSH, null, id) != TextToSpeech.SUCCESS) finished(id, true)
     }
 
-    /** Reproduce PCM 16 bits mono 24 kHz. Se interrumpe si cambia [generation]. */
-    private fun play(pcm: ByteArray, gen: Int) {
-        val rate = NeuralVoice.SAMPLE_RATE
-        val minBuf = AudioTrack.getMinBufferSize(rate, AudioFormat.CHANNEL_OUT_MONO, AudioFormat.ENCODING_PCM_16BIT)
-        val track = try {
+    /** Reproduce PCM 16 bits mono 24 kHz a medida que llega. Se corta si cambia [generation]. */
+    private inner class PcmPlayer(private val gen: Int) {
+        private var track: AudioTrack? = null
+        private val all = ByteArrayOutputStream()
+        private var carry: Byte? = null
+        var bytes = 0
+            private set
+
+        private fun open(): AudioTrack? = try {
+            val rate = NeuralVoice.SAMPLE_RATE
+            val minBuf = AudioTrack.getMinBufferSize(rate, AudioFormat.CHANNEL_OUT_MONO, AudioFormat.ENCODING_PCM_16BIT)
             AudioTrack.Builder()
                 .setAudioAttributes(attrs)
                 .setAudioFormat(
@@ -160,32 +202,57 @@ class Speaker(context: Context, private val onReady: (() -> Unit)? = null) : Tex
                         .build()
                 )
                 .setTransferMode(AudioTrack.MODE_STREAM)
-                .setBufferSizeInBytes(max(minBuf, 16384))
+                .setBufferSizeInBytes(max(minBuf, 8192))
                 .build()
+                .also { it.play() }
         } catch (e: Exception) {
-            return
+            null
         }
-        try {
-            track.play()
+
+        fun write(input: ByteArray) {
+            if (gen != generation || input.isEmpty()) return
+            var data = input
+            carry?.let { c -> data = byteArrayOf(c) + input; carry = null }
+            if (data.size % 2 == 1) {
+                carry = data[data.size - 1]
+                data = data.copyOf(data.size - 1)
+            }
+            if (data.isEmpty()) return
+            val t = track ?: open()?.also { track = it } ?: return
+            all.write(data, 0, data.size)
             var off = 0
-            while (off < pcm.size && gen == generation) {
-                val n = track.write(pcm, off, min(8192, pcm.size - off))
+            while (off < data.size && gen == generation) {
+                val n = t.write(data, off, data.size - off)
                 if (n <= 0) break
                 off += n
             }
-            val frames = pcm.size / 2
-            var waited = 0
-            while (gen == generation && track.playbackHeadPosition < frames && waited < 30000) {
-                Thread.sleep(20); waited += 20
+            bytes += data.size
+        }
+
+        fun all(): ByteArray = all.toByteArray()
+
+        fun finish() {
+            val t = track ?: return
+            try {
+                val frames = bytes / 2
+                var waited = 0
+                while (gen == generation && t.playbackHeadPosition < frames && waited < 60000) {
+                    Thread.sleep(15); waited += 15
+                }
+                if (gen != generation) {
+                    t.pause(); t.flush()
+                } else {
+                    t.stop()
+                }
+            } catch (_: Exception) {
+            } finally {
+                release()
             }
-            if (gen != generation) {
-                track.pause(); track.flush()
-            } else {
-                track.stop()
-            }
-        } catch (_: Exception) {
-        } finally {
-            try { track.release() } catch (_: Exception) {}
+        }
+
+        fun release() {
+            try { track?.release() } catch (_: Exception) {}
+            track = null
         }
     }
 
@@ -208,7 +275,7 @@ class Speaker(context: Context, private val onReady: (() -> Unit)? = null) : Tex
     }
 }
 
-/** Voz neuronal de Google Gemini (texto a voz), con caché de frases repetidas. */
+/** Voz neuronal de Google Gemini (texto a voz) en streaming, con caché en memoria y en disco. */
 object NeuralVoice {
     const val SAMPLE_RATE = 24000
     val VOICES = listOf(
@@ -225,38 +292,106 @@ object NeuralVoice {
         "Aoede" to "Aoede — femenina, suave"
     )
     private const val STYLE =
-        "Eres J.A.R.V.I.S., una inteligencia artificial mayordomo de película de superhéroes. Voz masculina de tono medio, nítida, refinada y extremadamente serena, con aire de mayordomo inglés culto. Habla con precisión casi digital, sin prisa pero con fluidez, cortés y con un humor seco muy sutil. Nunca exagera las emociones. Español de España."
+        "Eres J.A.R.V.I.S., una inteligencia artificial mayordomo de película de superhéroes. Voz masculina de tono medio, nítida, refinada y extremadamente serena, con aire de mayordomo inglés culto. Habla con precisión casi digital, con fluidez y buen ritmo, cortés y con un humor seco muy sutil. Nunca exagera las emociones. Español de España."
     private val MODELS = listOf("gemini-3.8-flash-tts", "gemini-3.1-flash-tts-preview")
-    private val cache = object : LinkedHashMap<String, ByteArray>(32, 0.75f, true) {
-        override fun removeEldestEntry(eldest: MutableMap.MutableEntry<String, ByteArray>?): Boolean = size > 30
+    private val memory = object : LinkedHashMap<String, ByteArray>(48, 0.75f, true) {
+        override fun removeEldestEntry(eldest: MutableMap.MutableEntry<String, ByteArray>?): Boolean = size > 40
     }
     @Volatile
     private var workingModel: String? = null
+    @Volatile
+    private var structuredOk = true
+    private var dir: File? = null
+    @Volatile
+    private var prewarming = false
 
-    fun synth(key: String, voice: String, text: String): ByteArray? {
-        val ck = "$voice|$text"
-        synchronized(cache) { cache[ck]?.let { return it } }
-        val models = workingModel?.let { listOf(it) } ?: MODELS
-        for (m in models) {
-            val pcm = try {
-                request(key, m, voice, text, structured = true)
-            } catch (e: LlmClient.HttpError) {
-                if (e.code == 400) {
-                    try { request(key, m, voice, text, structured = false) } catch (_: Exception) { null }
-                } else null
-            } catch (e: Exception) {
-                null
-            }
-            if (pcm != null && pcm.isNotEmpty()) {
-                workingModel = m
-                synchronized(cache) { cache[ck] = pcm }
-                return pcm
-            }
-        }
-        return null
+    fun init(ctx: Context) {
+        if (dir == null) dir = File(ctx.cacheDir, "voz").apply { mkdirs() }
     }
 
-    private fun request(key: String, model: String, voice: String, text: String, structured: Boolean): ByteArray? {
+    private fun id(voice: String, text: String): String {
+        val md = MessageDigest.getInstance("SHA-1").digest("$voice|$STYLE|$text".toByteArray(Charsets.UTF_8))
+        return md.joinToString("") { "%02x".format(it) }
+    }
+
+    fun cached(voice: String, text: String): ByteArray? {
+        val k = id(voice, text)
+        synchronized(memory) { memory[k]?.let { return it } }
+        val f = dir?.let { File(it, "$k.pcm") } ?: return null
+        if (!f.exists()) return null
+        return try {
+            f.readBytes().also { b -> synchronized(memory) { memory[k] = b } }
+        } catch (e: Exception) {
+            null
+        }
+    }
+
+    fun store(voice: String, text: String, pcm: ByteArray) {
+        if (pcm.isEmpty()) return
+        val k = id(voice, text)
+        synchronized(memory) { memory[k] = pcm }
+        // En disco solo frases cortas (confirmaciones, saludos), que son las que se repiten.
+        if (text.length <= 90) {
+            try { dir?.let { File(it, "$k.pcm").writeBytes(pcm) } } catch (_: Exception) {}
+        }
+    }
+
+    /** Genera en segundo plano las frases más habituales para que suenen al instante. */
+    fun prewarm(key: String, voice: String, phrases: List<String>) {
+        if (prewarming) return
+        prewarming = true
+        Thread {
+            try {
+                for (p in phrases) {
+                    if (cached(voice, p) != null) continue
+                    val out = ByteArrayOutputStream()
+                    val ok = stream(key, voice, p) { out.write(it, 0, it.size); true }
+                    if (!ok || out.size() == 0) break // sin red o límite de uso: lo dejamos para otro momento
+                    store(voice, p, out.toByteArray())
+                    Thread.sleep(1500)
+                }
+            } catch (_: Exception) {
+            } finally {
+                prewarming = false
+            }
+        }.start()
+    }
+
+    /**
+     * Pide el audio en streaming y llama a [onChunk] con cada trozo de PCM según llega.
+     * Devuelve true si el audio llegó completo. [onChunk] devuelve false para cancelar.
+     */
+    fun stream(key: String, voice: String, text: String, onChunk: (ByteArray) -> Boolean): Boolean {
+        val models = workingModel?.let { listOf(it) } ?: MODELS
+        for (m in models) {
+            var delivered = false
+            val wrapped: (ByteArray) -> Boolean = { delivered = true; onChunk(it) }
+            try {
+                if (request(key, m, voice, text, structuredOk, wrapped)) {
+                    workingModel = m; return true
+                }
+            } catch (e: LlmClient.HttpError) {
+                if (e.code == 400 && structuredOk && !delivered) {
+                    try {
+                        if (request(key, m, voice, text, false, wrapped)) {
+                            structuredOk = false; workingModel = m; return true
+                        }
+                    } catch (_: Exception) {
+                    }
+                }
+                if (e.code == 429) return false
+            } catch (e: Exception) {
+                return false
+            }
+            if (delivered) return false
+        }
+        return false
+    }
+
+    private fun request(
+        key: String, model: String, voice: String, text: String, structured: Boolean,
+        onChunk: (ByteArray) -> Boolean
+    ): Boolean {
         val part = if (structured) {
             JSONObject().put("text", text).put("speech_metadata", JSONObject().put("style", STYLE))
         } else {
@@ -273,29 +408,41 @@ object NeuralVoice {
                             .put("voiceConfig", JSONObject().put("prebuiltVoiceConfig", JSONObject().put("voiceName", voice)))
                     )
             )
-        val c = URL("https://generativelanguage.googleapis.com/v1beta/models/$model:generateContent")
+        val c = URL("https://generativelanguage.googleapis.com/v1beta/models/$model:streamGenerateContent?alt=sse")
             .openConnection() as HttpURLConnection
         try {
             c.requestMethod = "POST"
-            c.connectTimeout = 10000
-            c.readTimeout = 30000
+            c.connectTimeout = 8000
+            c.readTimeout = 20000
             c.doOutput = true
             c.setRequestProperty("Content-Type", "application/json; charset=utf-8")
             c.setRequestProperty("x-goog-api-key", key)
             c.outputStream.use { it.write(body.toString().toByteArray(Charsets.UTF_8)) }
             val code = c.responseCode
-            val stream = if (code in 200..299) c.inputStream else c.errorStream
-            val res = stream?.bufferedReader(Charsets.UTF_8)?.use { it.readText() } ?: ""
-            if (code !in 200..299) throw LlmClient.HttpError(code, res.take(300))
-            val parts = JSONObject(res).getJSONArray("candidates").getJSONObject(0)
-                .getJSONObject("content").getJSONArray("parts")
-            for (i in 0 until parts.length()) {
-                val p = parts.getJSONObject(i)
-                val inline = p.optJSONObject("inlineData") ?: p.optJSONObject("inline_data") ?: continue
-                val data = inline.optString("data", "")
-                if (data.isNotEmpty()) return Base64.decode(data, Base64.DEFAULT)
+            if (code !in 200..299) {
+                val err = c.errorStream?.bufferedReader(Charsets.UTF_8)?.use { it.readText() } ?: ""
+                throw LlmClient.HttpError(code, err.take(300))
             }
-            return null
+            var got = false
+            c.inputStream.bufferedReader(Charsets.UTF_8).use { reader ->
+                while (true) {
+                    val line = reader.readLine() ?: break
+                    if (!line.startsWith("data:")) continue
+                    val json = line.substring(5).trim()
+                    if (json.isEmpty() || json == "[DONE]") continue
+                    val cands = JSONObject(json).optJSONArray("candidates") ?: continue
+                    val parts = cands.optJSONObject(0)?.optJSONObject("content")?.optJSONArray("parts") ?: continue
+                    for (i in 0 until parts.length()) {
+                        val p = parts.getJSONObject(i)
+                        val inline = p.optJSONObject("inlineData") ?: p.optJSONObject("inline_data") ?: continue
+                        val data = inline.optString("data", "")
+                        if (data.isEmpty()) continue
+                        got = true
+                        if (!onChunk(Base64.decode(data, Base64.DEFAULT))) return true
+                    }
+                }
+            }
+            return got
         } finally {
             c.disconnect()
         }
@@ -333,5 +480,8 @@ object RecognizerFactory {
             putExtra(RecognizerIntent.EXTRA_PARTIAL_RESULTS, partial)
             putExtra(RecognizerIntent.EXTRA_MAX_RESULTS, 5)
             putExtra(RecognizerIntent.EXTRA_CALLING_PACKAGE, ctx.packageName)
+            // Cierra la escucha antes tras el último silencio: respuesta más rápida.
+            putExtra(RecognizerIntent.EXTRA_SPEECH_INPUT_COMPLETE_SILENCE_LENGTH_MILLIS, 700L)
+            putExtra(RecognizerIntent.EXTRA_SPEECH_INPUT_POSSIBLY_COMPLETE_SILENCE_LENGTH_MILLIS, 500L)
         }
 }

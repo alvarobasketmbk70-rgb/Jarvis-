@@ -49,6 +49,20 @@ object Commands {
     private val SHUT = Regex("^(callate|calla|silencio|para de hablar|basta|cierra el pico)$")
     private val REPEAT = Regex("^(repite|repitelo|repite eso|que has dicho|puedes repetir|como dices)$")
 
+    /**
+     * Órdenes sin parámetros que se pueden ejecutar en cuanto aparecen en el reconocimiento
+     * parcial, sin esperar a que termine la frase (así responde al instante).
+     */
+    fun instant(raw: String): Action? {
+        val p = parse(raw) as? Parse.Do ?: return null
+        val a = p.action
+        return when (a.type) {
+            "flashlight", "time", "date", "battery" -> a
+            "media" -> if (a.arg("cmd") in setOf("pause", "next", "previous")) a else null
+            else -> null
+        }
+    }
+
     fun isCancel(raw: String): Boolean = CANCEL.matches(Utt(raw).plain)
 
     private fun act(type: String, vararg kv: Pair<String, String>) = Parse.Do(Action(type, mapOf(*kv)))

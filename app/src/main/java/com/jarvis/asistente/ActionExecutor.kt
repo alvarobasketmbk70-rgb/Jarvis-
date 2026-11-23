@@ -156,7 +156,7 @@ class ActionExecutor(context: Context) {
         main.postDelayed({
             am.dispatchMediaKeyEvent(KeyEvent(KeyEvent.ACTION_DOWN, code))
             am.dispatchMediaKeyEvent(KeyEvent(KeyEvent.ACTION_UP, code))
-        }, 450)
+        }, 300)
         return ExecResult(true, text)
     }
 
