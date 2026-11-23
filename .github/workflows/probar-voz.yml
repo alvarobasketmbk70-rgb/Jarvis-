@@ -17,7 +17,8 @@ jobs:
           tar xjf v.tar.bz2 && mkdir -p app/src/main/assets && mv vits-piper-es_ES-davefx-medium app/src/main/assets/tts-es
       - name: Generar muestra
         run: |
-          pip install -q sherpa-onnx numpy
+          pip install -q "sherpa-onnx==1.13.8" numpy
+          for v in 1.13.8 1.13.7 1.12.36; do echo "AAR $v: $(curl -s -o /dev/null -w "%{http_code}" -L -I https://github.com/k2-fsa/sherpa-onnx/releases/download/v$v/sherpa-onnx-$v.aar)"; done
           mkdir -p muestras
           python3 tools/probar_voz_local.py
       - name: Publicar muestra
