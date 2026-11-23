@@ -1,0 +1,23 @@
+name: Muestras de voz
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  voces:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Generar muestras
+        env:
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+        run: python3 tools/muestras_voz.py
+      - name: Publicar muestras
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release delete voces --yes --cleanup-tag || true
+          gh release create voces muestras/*.wav --title "Muestras de voz de Jarvis" --notes "Toque cada archivo para escucharlo."
