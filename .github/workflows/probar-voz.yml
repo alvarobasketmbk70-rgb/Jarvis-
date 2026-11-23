@@ -1,0 +1,28 @@
+name: Probar voz incluida
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  probar:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Modelo de voz
+        run: |
+          curl -fL -o v.tar.bz2 https://github.com/k2-fsa/sherpa-onnx/releases/download/tts-models/vits-piper-es_ES-davefx-medium.tar.bz2
+          tar xjf v.tar.bz2 && mkdir -p app/src/main/assets && mv vits-piper-es_ES-davefx-medium app/src/main/assets/tts-es
+      - name: Generar muestra
+        run: |
+          pip install -q sherpa-onnx numpy
+          mkdir -p muestras
+          python3 tools/probar_voz_local.py
+      - name: Publicar muestra
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release delete voz-incluida --yes --cleanup-tag || true
+          gh release create voz-incluida muestras/*.wav --title "Muestra de la voz de JANUS (incluida, gratis)" --notes "Toque el archivo para escucharlo."
