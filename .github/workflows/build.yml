@@ -22,6 +22,21 @@ jobs:
         with:
           gradle-version: "8.9"
 
+      - name: Caché del modelo de voz local
+        uses: actions/cache@v4
+        with:
+          path: vosk-model-small-es-0.42.zip
+          key: vosk-model-small-es-0.42
+
+      - name: Modelo de voz local (español)
+        run: |
+          [ -f vosk-model-small-es-0.42.zip ] || curl -fL -o vosk-model-small-es-0.42.zip https://alphacephei.com/vosk/models/vosk-model-small-es-0.42.zip
+          rm -rf vosk-model-small-es-0.42 app/src/main/assets/model-es
+          unzip -q vosk-model-small-es-0.42.zip
+          mkdir -p app/src/main/assets
+          mv vosk-model-small-es-0.42 app/src/main/assets/model-es
+          du -sh app/src/main/assets/model-es
+
       - name: Compilar
         run: gradle assembleDebug --no-daemon --stacktrace
 

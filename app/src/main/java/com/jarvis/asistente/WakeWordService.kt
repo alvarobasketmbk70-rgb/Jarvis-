@@ -21,10 +21,18 @@ import android.os.Looper
 import android.os.PowerManager
 import android.speech.RecognitionListener
 import android.speech.SpeechRecognizer
+import org.json.JSONObject
+import org.vosk.Model
+import org.vosk.Recognizer
+import org.vosk.android.SpeechService
+import java.io.File
 
 /**
- * Modo «Oye Janus»: escucha en segundo plano mientras la pantalla está encendida y,
- * al oír «Janus», muestra el orbe flotante sobre cualquier app y atiende la orden.
+ * «Oye Janus», como «Oye Siri»:
+ *  - Un detector local (Vosk, sin internet) escucha de forma continua y silenciosa: no reinicia
+ *    el micrófono, no hace «bip» y no interrumpe la música ni los audios que esté escuchando.
+ *  - Solo cuando oye su nombre aparece el orbe y se usa el reconocedor de Google, una vez,
+ *    para entender la orden con precisión.
  */
 class WakeWordService : Service() {
 
@@ -33,6 +41,15 @@ class WakeWordService : Service() {
         private const val NOTIF_ID = 7
         private const val ACTION_STOP = "com.jarvis.asistente.STOP_WAKE"
         const val ACTION_SUMMON = "com.jarvis.asistente.SUMMON"
+        private const val MODEL_ASSET = "model-es"
+        private const val MODEL_VERSION = "vosk-model-small-es-0.42"
+
+        /** Formas inequívocas del nombre, y formas dudosas que solo valen tras «oye»/«hola». */
+        private val WAKE = Regex(
+            "\\b(janus|yanus|llanus|ianus|yannus|janos)\\b|" +
+                "\\b(oye|hola|hey|eh)\\s+(llanos|llano|yanos|yano|ianos|jano|hanos|anos|ya nos|lanus|jonás|jonas|yanes|llanes)\\b",
+            RegexOption.IGNORE_CASE
+        )
 
         /**
          * Invoca a Janus al estilo Siri (orbe flotante sobre la app actual). Devuelve false
@@ -49,7 +66,6 @@ class WakeWordService : Service() {
                 false
             }
         }
-        private val WAKE = Regex("\\b(janus|yanus|llanus|ianus|yanos|llanos|janos|ianos|yannus|jano)\\b", RegexOption.IGNORE_CASE)
 
         @Volatile
         var instance: WakeWordService? = null
@@ -69,6 +85,9 @@ class WakeWordService : Service() {
         fun stop(ctx: Context) {
             ctx.stopService(Intent(ctx, WakeWordService::class.java))
         }
+
+        @Volatile
+        private var sharedModel: Model? = null
     }
 
     private val main = Handler(Looper.getMainLooper())
@@ -77,12 +96,19 @@ class WakeWordService : Service() {
     private lateinit var brain: Brain
     private lateinit var executor: ActionExecutor
     private lateinit var overlay: OverlayOrb
+
+    // Detector local de «Janus»
+    private var wakeService: SpeechService? = null
+    private var wakeRecognizer: Recognizer? = null
+
+    // Reconocedor de Google para la orden
     private var recognizer: SpeechRecognizer? = null
+    private var commandListening = false
+
     private var busy = false
+    private var inInteraction = false
     private var paused = false
     private var screenOff = false
-    private var awaiting = false
-    private var listening = false
     private var destroyed = false
     private var receiverOn = false
 
@@ -91,14 +117,12 @@ class WakeWordService : Service() {
             when (intent?.action) {
                 Intent.ACTION_SCREEN_OFF -> {
                     screenOff = true
-                    recognizer?.cancel()
-                    listening = false
-                    BeepMuter.unmuteNow(this@WakeWordService)
-                    if (!busy) overlay.hide()
+                    stopWake()
+                    if (!busy) endInteraction()
                 }
                 Intent.ACTION_SCREEN_ON -> {
                     screenOff = false
-                    main.postDelayed({ listen() }, 500)
+                    main.postDelayed({ startWake() }, 400)
                 }
             }
         }
@@ -128,7 +152,7 @@ class WakeWordService : Service() {
         if (Build.VERSION.SDK_INT >= 33) registerReceiver(screenReceiver, filter, Context.RECEIVER_NOT_EXPORTED)
         else registerReceiver(screenReceiver, filter)
         receiverOn = true
-        main.postDelayed({ listen() }, 800)
+        loadModel()
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
@@ -148,6 +172,7 @@ class WakeWordService : Service() {
         if (receiverOn) {
             try { unregisterReceiver(screenReceiver) } catch (_: Exception) {}
         }
+        stopWake()
         recognizer?.destroy()
         recognizer = null
         BeepMuter.unmuteNow(this)
@@ -180,75 +205,172 @@ class WakeWordService : Service() {
         false
     }
 
-    /** La app principal pausa este servicio mientras está en pantalla. */
-    fun setPaused(p: Boolean) {
-        main.post {
-            paused = p
-            if (p) {
-                recognizer?.cancel()
-                listening = false
-                BeepMuter.unmuteNow(this)
-                overlay.hide()
-            } else {
-                main.postDelayed({ listen() }, 600)
+    // ---------------- Modelo local ----------------
+    private fun loadModel() {
+        sharedModel?.let { main.post { startWake() }; return }
+        Thread {
+            val m = try {
+                val dir = File(filesDir, MODEL_ASSET)
+                val marker = File(dir, ".version")
+                if (!marker.exists() || marker.readText() != MODEL_VERSION) {
+                    dir.deleteRecursively()
+                    copyAssets(MODEL_ASSET, dir)
+                    marker.writeText(MODEL_VERSION)
+                }
+                Model(dir.absolutePath)
+            } catch (e: Throwable) {
+                null
             }
+            main.post {
+                if (m == null) {
+                    // Sin detector local no hay «Oye Janus», pero el botón de encendido y el atajo siguen funcionando.
+                    if (!prefs.wakeWord) stopSelf()
+                    return@post
+                }
+                sharedModel = m
+                startWake()
+            }
+        }.start()
+    }
+
+    private fun copyAssets(path: String, dest: File) {
+        val list = assets.list(path) ?: emptyArray()
+        if (list.isEmpty()) {
+            dest.parentFile?.mkdirs()
+            assets.open(path).use { input -> dest.outputStream().use { input.copyTo(it) } }
+            return
+        }
+        dest.mkdirs()
+        for (name in list) copyAssets("$path/$name", File(dest, name))
+    }
+
+    // ---------------- Detector «Oye Janus» ----------------
+    private fun canWake(): Boolean =
+        prefs.wakeWord && !destroyed && !paused && !appInForeground && !screenOff && !busy && !inInteraction &&
+            checkSelfPermission(Manifest.permission.RECORD_AUDIO) == PackageManager.PERMISSION_GRANTED
+
+    private fun startWake() {
+        if (wakeService != null || !canWake()) return
+        val model = sharedModel ?: return
+        try {
+            val rec = Recognizer(model, 16000f)
+            val svc = SpeechService(rec, 16000f)
+            wakeRecognizer = rec
+            wakeService = svc
+            BeepMuter.unmuteNow(this)
+            svc.startListening(wakeListener)
+        } catch (e: Exception) {
+            stopWake()
+            main.postDelayed({ startWake() }, 3000)
         }
     }
 
-    /** Muestra el orbe y escucha una orden directamente (sin necesidad de decir «Janus»). */
+    private fun stopWake() {
+        val svc = wakeService
+        wakeService = null
+        try { svc?.stop() } catch (_: Exception) {}
+        try { svc?.shutdown() } catch (_: Exception) {}
+        try { wakeRecognizer?.close() } catch (_: Exception) {}
+        wakeRecognizer = null
+    }
+
+    private val wakeListener = object : org.vosk.android.RecognitionListener {
+        override fun onPartialResult(hypothesis: String?) = check(hypothesis, "partial")
+        override fun onResult(hypothesis: String?) = check(hypothesis, "text")
+        override fun onFinalResult(hypothesis: String?) = check(hypothesis, "text")
+        override fun onError(exception: Exception?) {
+            stopWake()
+            main.postDelayed({ startWake() }, 2000)
+        }
+        override fun onTimeout() {
+            stopWake()
+            main.postDelayed({ startWake() }, 500)
+        }
+
+        private fun check(json: String?, field: String) {
+            if (json == null || wakeService == null) return
+            val text = try { JSONObject(json).optString(field, "") } catch (_: Exception) { "" }
+            if (text.isNotBlank() && WAKE.containsMatchIn(text)) onWake()
+        }
+    }
+
+    private fun onWake() {
+        stopWake()
+        beginInteraction()
+    }
+
+    // ---------------- Interacción (como Siri) ----------------
+    /** Muestra el orbe y escucha una orden directamente (sin necesidad de decir el nombre). */
     fun summonNow() {
         main.post {
             if (destroyed) return@post
             speaker.stop()
-            recognizer?.cancel()
-            listening = false
+            stopWake()
+            stopCommand()
             busy = false
-            awaiting = true
-            overlay.show(OrbView.State.LISTENING, "")
-            main.postDelayed({ listen() }, 150)
+            beginInteraction()
+        }
+    }
+
+    private fun beginInteraction() {
+        inInteraction = true
+        overlay.show(OrbView.State.LISTENING, "")
+        // Pequeña pausa para que el micrófono pase del detector local a Google sin cortes.
+        main.postDelayed({ startCommand() }, 200)
+    }
+
+    private fun endInteraction() {
+        stopCommand()
+        inInteraction = false
+        busy = false
+        BeepMuter.unmuteNow(this)
+        overlay.hide()
+        if (!prefs.wakeWord) {
+            main.postDelayed({ if (!inInteraction) stopSelf() }, 800)
+        } else {
+            main.postDelayed({ startWake() }, 500)
         }
     }
 
     private fun cancelInteraction() {
         speaker.stop()
-        recognizer?.cancel()
-        listening = false
-        BeepMuter.unmuteNow(this)
-        busy = false
-        awaiting = false
-        overlay.hide()
-        main.postDelayed({ listen() }, 400)
+        endInteraction()
     }
 
-    private fun listen() {
-        if (destroyed || busy || paused || appInForeground || screenOff || listening) return
+    private fun startCommand() {
+        if (destroyed || !inInteraction || commandListening) return
         if (checkSelfPermission(Manifest.permission.RECORD_AUDIO) != PackageManager.PERMISSION_GRANTED) {
-            stopSelf(); return
+            endInteraction(); return
         }
         val r = recognizer ?: RecognizerFactory.create(this)?.also {
-            it.setRecognitionListener(listener)
+            it.setRecognitionListener(commandListener)
             recognizer = it
         }
         if (r == null) {
-            stopSelf(); return
+            overlay.setText("No encuentro el reconocedor de voz de Google.")
+            main.postDelayed({ endInteraction() }, 2500)
+            return
         }
-        listening = true
+        commandListening = true
+        overlay.show(OrbView.State.LISTENING)
         try {
             BeepMuter.mute(this)
             r.startListening(RecognizerFactory.intent(this, true))
         } catch (e: Exception) {
-            recreate(1500)
+            commandListening = false
+            recognizer?.destroy(); recognizer = null
+            endInteraction()
         }
     }
 
-    private fun recreate(delay: Long) {
-        recognizer?.destroy()
-        recognizer = null
-        listening = false
-        main.postDelayed({ listen() }, delay)
+    private fun stopCommand() {
+        if (commandListening) {
+            commandListening = false
+            try { recognizer?.cancel() } catch (_: Exception) {}
+        }
     }
 
-    private val listener = object : RecognitionListener {
+    private val commandListener = object : RecognitionListener {
         override fun onReadyForSpeech(params: Bundle?) {
             BeepMuter.unmuteSoon(this@WakeWordService, 800)
         }
@@ -259,97 +381,43 @@ class WakeWordService : Service() {
         override fun onBufferReceived(buffer: ByteArray?) {}
         override fun onEndOfSpeech() {
             BeepMuter.mute(this@WakeWordService)
-            if (awaiting && overlay.isShown) overlay.show(OrbView.State.THINKING)
+            if (overlay.isShown) overlay.show(OrbView.State.THINKING)
         }
         override fun onEvent(eventType: Int, params: Bundle?) {}
 
         override fun onPartialResults(partialResults: Bundle?) {
-            if (!listening || busy) return
+            if (!commandListening || busy) return
             val t = partialResults?.getStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION)?.firstOrNull() ?: return
-            if (awaiting) {
-                if (t.isNotBlank()) overlay.setText(t)
-                if (Commands.instant(t) != null) runEarly(t.trim())
-                return
-            }
-            val m = WAKE.find(t) ?: return
-            val rest = t.substring(m.range.last + 1).trim(' ', ',', '.', '!', '?', '¿', '¡')
-            // En cuanto se oye «Janus» aparece el orbe, sin esperar al final de la frase.
-            overlay.show(OrbView.State.LISTENING, rest)
-            if (rest.isNotEmpty() && Commands.instant(rest) != null) runEarly(rest)
+            if (t.isNotBlank()) overlay.setText(t)
+            // Órdenes sencillas: se ejecutan sin esperar al final de la frase.
+            if (Commands.instant(t) != null) runCommand(t.trim())
         }
 
         override fun onResults(results: Bundle?) {
-            if (!listening) return
-            listening = false
+            if (!commandListening) return
+            commandListening = false
             BeepMuter.unmuteSoon(this@WakeWordService)
-            if (destroyed || paused) return
-            onHeard(results?.getStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION) ?: arrayListOf())
+            val cmd = results?.getStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION)?.firstOrNull()?.trim().orEmpty()
+            // Si el usuario repitió el nombre («Oye Janus, pon música»), se quita.
+            val clean = cmd.replace(WAKE, "").trim(' ', ',', '.', '!', '?', '¿', '¡')
+            if (clean.isEmpty()) endInteraction() else runCommand(clean)
         }
 
         override fun onError(error: Int) {
-            if (!listening) return
-            listening = false
-            BeepMuter.unmuteSoon(this@WakeWordService)
-            if (destroyed || paused) return
-            if (awaiting) {
-                awaiting = false
-                overlay.hide()
-                if (!prefs.wakeWord) {
-                    stopSelf(); return
-                }
-            } else if (!busy) {
-                overlay.hide()
+            if (!commandListening) return
+            commandListening = false
+            if (error == SpeechRecognizer.ERROR_RECOGNIZER_BUSY || error == SpeechRecognizer.ERROR_CLIENT) {
+                recognizer?.destroy(); recognizer = null
             }
-            when (error) {
-                SpeechRecognizer.ERROR_RECOGNIZER_BUSY, SpeechRecognizer.ERROR_CLIENT -> recreate(1500)
-                SpeechRecognizer.ERROR_NETWORK, SpeechRecognizer.ERROR_NETWORK_TIMEOUT, SpeechRecognizer.ERROR_SERVER ->
-                    main.postDelayed({ listen() }, 5000)
-                SpeechRecognizer.ERROR_INSUFFICIENT_PERMISSIONS -> stopSelf()
-                else -> main.postDelayed({ listen() }, 250)
-            }
+            endInteraction()
         }
     }
 
-    /** Ejecuta una orden sencilla nada más reconocerla, cortando la escucha. */
-    private fun runEarly(cmd: String) {
-        listening = false
-        awaiting = false
-        recognizer?.cancel()
+    private fun runCommand(cmd: String) {
+        if (busy) return
+        stopCommand()
         BeepMuter.unmuteSoon(this)
         busy = true
-        overlay.show(OrbView.State.THINKING, cmd)
-        brain.process(cmd) { reply -> handleReply(cmd, reply) }
-    }
-
-    private fun onHeard(list: List<String>) {
-        var command: String? = null
-        if (awaiting) {
-            awaiting = false
-            command = list.firstOrNull()?.trim()
-        } else {
-            for (t in list) {
-                val m = WAKE.find(t) ?: continue
-                command = t.substring(m.range.last + 1).trim(' ', ',', '.', '!', '?', '¿', '¡')
-                break
-            }
-        }
-        val cmd: String = command ?: run {
-            overlay.hide()
-            listen()
-            return
-        }
-        busy = true
-        if (cmd.isEmpty()) {
-            val q = "¿Sí, ${prefs.userName}?"
-            overlay.show(OrbView.State.SPEAKING, q)
-            speaker.speak(q) {
-                busy = false
-                awaiting = true
-                overlay.show(OrbView.State.LISTENING, "")
-                listen()
-            }
-            return
-        }
         overlay.show(OrbView.State.THINKING, cmd)
         brain.process(cmd) { reply -> handleReply(cmd, reply) }
     }
@@ -372,11 +440,27 @@ class WakeWordService : Service() {
 
     private fun done(follow: Boolean) {
         busy = false
-        awaiting = follow
-        if (!follow && !prefs.wakeWord) {
-            main.postDelayed({ if (!busy && !awaiting) stopSelf() }, 800)
+        if (follow && inInteraction) {
+            overlay.show(OrbView.State.LISTENING, "")
+            main.postDelayed({ startCommand() }, 150)
+        } else {
+            main.postDelayed({ if (!busy) endInteraction() }, 500)
         }
-        if (follow) overlay.show(OrbView.State.LISTENING, "") else main.postDelayed({ if (!busy && !awaiting) overlay.hide() }, 600)
-        listen()
+    }
+
+    /** La app principal pausa este servicio mientras está en pantalla. */
+    fun setPaused(p: Boolean) {
+        main.post {
+            paused = p
+            if (p) {
+                stopWake()
+                if (inInteraction) {
+                    speaker.stop()
+                    endInteraction()
+                }
+            } else {
+                main.postDelayed({ startWake() }, 600)
+            }
+        }
     }
 }
