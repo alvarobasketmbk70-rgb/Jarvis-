@@ -28,8 +28,8 @@ class MainActivity : Activity() {
     companion object {
         const val EXTRA_LISTEN = "listen"
         private const val REQ_PERMS = 10
-        private const val BG = 0xFF020B14.toInt()
-        private const val ACCENT = 0xFF00E5FF.toInt()
+        private const val BG = 0xFF070B14.toInt()
+        private const val ACCENT = 0xFFFFB547.toInt()
         private const val IDLE_HINT = "Toque el orbe para hablar"
     }
 
@@ -67,6 +67,15 @@ class MainActivity : Activity() {
             addBubble("Consejo: en ⚙ puede añadir una clave de IA gratuita para conversar conmigo y activar la accesibilidad para que pueda tocar la pantalla por usted.", false)
         }
         if (prefs.wakeWord && hasMic()) WakeWordService.start(this)
+        if (prefs.wakeWord && !android.provider.Settings.canDrawOverlays(this)) {
+            addBubble("Para que aparezca sobre cualquier app al decir «Oye Jarvis», toque aquí y active «Mostrar sobre otras apps» para Jarvis.", false)
+                .setOnClickListener {
+                    try {
+                        startActivity(Intent(android.provider.Settings.ACTION_MANAGE_OVERLAY_PERMISSION, android.net.Uri.parse("package:$packageName")))
+                    } catch (_: Exception) {
+                    }
+                }
+        }
     }
 
     override fun onNewIntent(intent: Intent) {
@@ -80,6 +89,7 @@ class MainActivity : Activity() {
     override fun onResume() {
         super.onResume()
         resumed = true
+        WakeWordService.appInForeground = true
         WakeWordService.instance?.setPaused(true)
         if (listenOnResume && hasMic()) {
             listenOnResume = false
@@ -90,6 +100,7 @@ class MainActivity : Activity() {
     override fun onPause() {
         resumed = false
         stopListening()
+        WakeWordService.appInForeground = false
         WakeWordService.instance?.setPaused(false)
         super.onPause()
     }
@@ -138,6 +149,7 @@ class MainActivity : Activity() {
         super.onRequestPermissionsResult(requestCode, permissions, grantResults)
         if (requestCode == REQ_PERMS) {
             if (hasMic()) {
+                if (prefs.wakeWord) WakeWordService.start(this)
                 if (!listening && !speaker.isSpeaking) main.postDelayed({ if (resumed) startListening() }, 300)
             } else {
                 status.text = "Necesito el micrófono para escucharle."
@@ -343,12 +355,14 @@ class MainActivity : Activity() {
             isClickable = true
             setOnClickListener { onOrbTap() }
         }
-        root.addView(orb, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(250)))
+        root.addView(orb, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(320)))
 
         status = TextView(this).apply {
             text = IDLE_HINT
-            setTextColor(0xFF80DEEA.toInt())
-            textSize = 15f
+            setTextColor(0xFFE8D9BE.toInt())
+            textSize = 13f
+            isAllCaps = true
+            letterSpacing = 0.18f
             gravity = Gravity.CENTER
             setPadding(0, 0, 0, dp(8))
         }
@@ -368,7 +382,7 @@ class MainActivity : Activity() {
             hint = "Escriba una orden…"
             setHintTextColor(0xFF4A6572.toInt())
             setTextColor(Color.WHITE)
-            background = rounded(0xFF0B1E2D.toInt(), 22, 0xFF0D3B4F.toInt())
+            background = rounded(0xFF111827.toInt(), 22, 0x55FFB547)
             setPadding(dp(16), dp(10), dp(16), dp(10))
             inputType = InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_FLAG_CAP_SENTENCES
             imeOptions = EditorInfo.IME_ACTION_SEND
@@ -392,12 +406,12 @@ class MainActivity : Activity() {
         setContentView(root)
     }
 
-    private fun addBubble(text: String, fromUser: Boolean) {
+    private fun addBubble(text: String, fromUser: Boolean): TextView {
         val tv = TextView(this).apply {
             this.text = text
             textSize = 15f
-            setTextColor(if (fromUser) Color.WHITE else 0xFFB2EBF2.toInt())
-            background = if (fromUser) rounded(0xFF0D3B4F.toInt(), 16) else rounded(0xFF06131F.toInt(), 16, 0xFF0D3B4F.toInt())
+            setTextColor(if (fromUser) Color.WHITE else 0xFFF4E6CC.toInt())
+            background = if (fromUser) rounded(0xFF1A2333.toInt(), 16) else rounded(0xFF0C111C.toInt(), 16, 0x44FFB547)
             setPadding(dp(14), dp(10), dp(14), dp(10))
         }
         val lp = LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT).apply {
@@ -408,5 +422,6 @@ class MainActivity : Activity() {
         chat.addView(tv, lp)
         while (chat.childCount > 40) chat.removeViewAt(0)
         scroll.post { scroll.fullScroll(ScrollView.FOCUS_DOWN) }
+        return tv
     }
 }

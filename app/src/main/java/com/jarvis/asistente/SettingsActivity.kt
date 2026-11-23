@@ -77,7 +77,7 @@ class SettingsActivity : Activity() {
         col.addView(button("Probar voz") { testVoice() })
         swConv = switch("Modo conversación: sigue escuchando después de responder", prefs.conversationMode); col.addView(swConv)
         swWa = switch("Enviar WhatsApp automáticamente (requiere accesibilidad)", prefs.autoSendWhatsApp); col.addView(swWa)
-        swWake = switch("Escuchar «Jarvis» en segundo plano (experimental, gasta batería)", prefs.wakeWord); col.addView(swWake)
+        swWake = switch("Responder a «Oye Jarvis» con la app cerrada (con la pantalla encendida; gasta algo de batería)", prefs.wakeWord); col.addView(swWake)
         swWake.setOnCheckedChangeListener { _, on ->
             if (on && checkSelfPermission(Manifest.permission.RECORD_AUDIO) != PackageManager.PERMISSION_GRANTED) {
                 toast("Primero conceda el permiso de micrófono abriendo Jarvis.")

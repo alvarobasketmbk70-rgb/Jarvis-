@@ -6,8 +6,10 @@ import android.app.NotificationChannel
 import android.app.NotificationManager
 import android.app.PendingIntent
 import android.app.Service
+import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
+import android.content.IntentFilter
 import android.content.pm.PackageManager
 import android.content.pm.ServiceInfo
 import android.graphics.drawable.Icon
@@ -16,12 +18,13 @@ import android.os.Bundle
 import android.os.Handler
 import android.os.IBinder
 import android.os.Looper
+import android.os.PowerManager
 import android.speech.RecognitionListener
 import android.speech.SpeechRecognizer
 
 /**
- * Modo manos libres: escucha continuamente y reacciona cuando oye «Jarvis…».
- * Funciona con el reconocedor de Google en bucle, así que consume batería y datos.
+ * Modo «Oye Jarvis»: escucha en segundo plano mientras la pantalla está encendida y,
+ * al oír «Jarvis», muestra el orbe flotante sobre cualquier app y atiende la orden.
  */
 class WakeWordService : Service() {
 
@@ -29,11 +32,15 @@ class WakeWordService : Service() {
         private const val CHANNEL = "jarvis_wake"
         private const val NOTIF_ID = 7
         private const val ACTION_STOP = "com.jarvis.asistente.STOP_WAKE"
-        private val WAKE = Regex("\\b(jarvis|yarvis|jarbis|yarbis|jervis|charvis|harvis|jarviz)\\b", RegexOption.IGNORE_CASE)
+        private val WAKE = Regex("\\b(jarvis|yarvis|jarbis|yarbis|jervis|charvis|harvis|jarviz|chavis)\\b", RegexOption.IGNORE_CASE)
 
         @Volatile
         var instance: WakeWordService? = null
             private set
+
+        /** true mientras la pantalla principal de Jarvis está visible (ella usa el micrófono). */
+        @Volatile
+        var appInForeground = false
 
         fun start(ctx: Context) {
             try {
@@ -52,12 +59,32 @@ class WakeWordService : Service() {
     private lateinit var speaker: Speaker
     private lateinit var brain: Brain
     private lateinit var executor: ActionExecutor
+    private lateinit var overlay: OverlayOrb
     private var recognizer: SpeechRecognizer? = null
     private var busy = false
     private var paused = false
+    private var screenOff = false
     private var awaiting = false
     private var listening = false
     private var destroyed = false
+    private var receiverOn = false
+
+    private val screenReceiver = object : BroadcastReceiver() {
+        override fun onReceive(context: Context?, intent: Intent?) {
+            when (intent?.action) {
+                Intent.ACTION_SCREEN_OFF -> {
+                    screenOff = true
+                    recognizer?.cancel()
+                    listening = false
+                    if (!busy) overlay.hide()
+                }
+                Intent.ACTION_SCREEN_ON -> {
+                    screenOff = false
+                    main.postDelayed({ listen() }, 500)
+                }
+            }
+        }
+    }
 
     override fun onBind(intent: Intent?): IBinder? = null
 
@@ -67,10 +94,20 @@ class WakeWordService : Service() {
         speaker = Speaker(this)
         brain = Brain(this)
         executor = ActionExecutor(this)
+        overlay = OverlayOrb(this)
+        overlay.onTap = { cancelInteraction() }
         if (!goForeground()) {
             stopSelf(); return
         }
         instance = this
+        screenOff = !getSystemService(PowerManager::class.java).isInteractive
+        val filter = IntentFilter().apply {
+            addAction(Intent.ACTION_SCREEN_OFF)
+            addAction(Intent.ACTION_SCREEN_ON)
+        }
+        if (Build.VERSION.SDK_INT >= 33) registerReceiver(screenReceiver, filter, Context.RECEIVER_NOT_EXPORTED)
+        else registerReceiver(screenReceiver, filter)
+        receiverOn = true
         main.postDelayed({ listen() }, 800)
     }
 
@@ -86,15 +123,19 @@ class WakeWordService : Service() {
         destroyed = true
         instance = null
         main.removeCallbacksAndMessages(null)
+        if (receiverOn) {
+            try { unregisterReceiver(screenReceiver) } catch (_: Exception) {}
+        }
         recognizer?.destroy()
         recognizer = null
         speaker.shutdown()
+        overlay.hide()
         super.onDestroy()
     }
 
     private fun goForeground(): Boolean = try {
         val nm = getSystemService(NotificationManager::class.java)
-        nm.createNotificationChannel(NotificationChannel(CHANNEL, "Escucha de «Jarvis»", NotificationManager.IMPORTANCE_LOW))
+        nm.createNotificationChannel(NotificationChannel(CHANNEL, "Escucha de «Oye Jarvis»", NotificationManager.IMPORTANCE_LOW))
         val open = PendingIntent.getActivity(
             this, 0, Intent(this, MainActivity::class.java), PendingIntent.FLAG_IMMUTABLE
         )
@@ -104,7 +145,7 @@ class WakeWordService : Service() {
         val n = Notification.Builder(this, CHANNEL)
             .setSmallIcon(R.drawable.ic_stat_jarvis)
             .setContentTitle("Jarvis está atento")
-            .setContentText("Diga «Jarvis» seguido de una orden")
+            .setContentText("Diga «Oye Jarvis» seguido de una orden")
             .setContentIntent(open)
             .setOngoing(true)
             .addAction(Notification.Action.Builder(Icon.createWithResource(this, R.drawable.ic_stat_jarvis), "Detener", stop).build())
@@ -123,14 +164,25 @@ class WakeWordService : Service() {
             if (p) {
                 recognizer?.cancel()
                 listening = false
+                overlay.hide()
             } else {
                 main.postDelayed({ listen() }, 600)
             }
         }
     }
 
+    private fun cancelInteraction() {
+        speaker.stop()
+        recognizer?.cancel()
+        listening = false
+        busy = false
+        awaiting = false
+        overlay.hide()
+        main.postDelayed({ listen() }, 400)
+    }
+
     private fun listen() {
-        if (destroyed || busy || paused || listening) return
+        if (destroyed || busy || paused || appInForeground || screenOff || listening) return
         if (checkSelfPermission(Manifest.permission.RECORD_AUDIO) != PackageManager.PERMISSION_GRANTED) {
             stopSelf(); return
         }
@@ -143,7 +195,7 @@ class WakeWordService : Service() {
         }
         listening = true
         try {
-            r.startListening(RecognizerFactory.intent(this, false))
+            r.startListening(RecognizerFactory.intent(this, true))
         } catch (e: Exception) {
             recreate(1500)
         }
@@ -159,11 +211,25 @@ class WakeWordService : Service() {
     private val listener = object : RecognitionListener {
         override fun onReadyForSpeech(params: Bundle?) {}
         override fun onBeginningOfSpeech() {}
-        override fun onRmsChanged(rmsdB: Float) {}
+        override fun onRmsChanged(rmsdB: Float) {
+            if (overlay.isShown) overlay.setLevel(rmsdB)
+        }
         override fun onBufferReceived(buffer: ByteArray?) {}
-        override fun onEndOfSpeech() {}
-        override fun onPartialResults(partialResults: Bundle?) {}
+        override fun onEndOfSpeech() {
+            if (awaiting && overlay.isShown) overlay.show(OrbView.State.THINKING)
+        }
         override fun onEvent(eventType: Int, params: Bundle?) {}
+
+        override fun onPartialResults(partialResults: Bundle?) {
+            val t = partialResults?.getStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION)?.firstOrNull() ?: return
+            if (awaiting) {
+                if (t.isNotBlank()) overlay.setText(t)
+                return
+            }
+            val m = WAKE.find(t) ?: return
+            // En cuanto se oye «Jarvis» aparece el orbe, sin esperar al final de la frase.
+            overlay.show(OrbView.State.LISTENING, t.substring(m.range.last + 1).trim())
+        }
 
         override fun onResults(results: Bundle?) {
             listening = false
@@ -174,15 +240,18 @@ class WakeWordService : Service() {
         override fun onError(error: Int) {
             listening = false
             if (destroyed || paused) return
+            if (awaiting) {
+                awaiting = false
+                overlay.hide()
+            } else if (!busy) {
+                overlay.hide()
+            }
             when (error) {
                 SpeechRecognizer.ERROR_RECOGNIZER_BUSY, SpeechRecognizer.ERROR_CLIENT -> recreate(1500)
                 SpeechRecognizer.ERROR_NETWORK, SpeechRecognizer.ERROR_NETWORK_TIMEOUT, SpeechRecognizer.ERROR_SERVER ->
                     main.postDelayed({ listen() }, 5000)
                 SpeechRecognizer.ERROR_INSUFFICIENT_PERMISSIONS -> stopSelf()
-                else -> {
-                    awaiting = false
-                    main.postDelayed({ listen() }, 300)
-                }
+                else -> main.postDelayed({ listen() }, 250)
             }
         }
     }
@@ -199,16 +268,24 @@ class WakeWordService : Service() {
                 break
             }
         }
-        val cmd: String = command ?: run { listen(); return }
+        val cmd: String = command ?: run {
+            overlay.hide()
+            listen()
+            return
+        }
         busy = true
         if (cmd.isEmpty()) {
-            speaker.speak("¿Sí, ${prefs.userName}?") {
+            val q = "¿Sí, ${prefs.userName}?"
+            overlay.show(OrbView.State.SPEAKING, q)
+            speaker.speak(q) {
                 busy = false
                 awaiting = true
+                overlay.show(OrbView.State.LISTENING, "")
                 listen()
             }
             return
         }
+        overlay.show(OrbView.State.THINKING, cmd)
         brain.process(cmd) { reply -> handleReply(cmd, reply) }
     }
 
@@ -224,12 +301,14 @@ class WakeWordService : Service() {
         if (text.isBlank()) {
             done(follow); return
         }
+        overlay.show(OrbView.State.SPEAKING, text)
         speaker.speak(text) { done(follow) }
     }
 
     private fun done(follow: Boolean) {
         busy = false
         awaiting = follow
+        if (follow) overlay.show(OrbView.State.LISTENING, "") else main.postDelayed({ if (!busy && !awaiting) overlay.hide() }, 600)
         listen()
     }
 }
