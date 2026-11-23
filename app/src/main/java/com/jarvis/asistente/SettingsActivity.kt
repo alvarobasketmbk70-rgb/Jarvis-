@@ -30,6 +30,7 @@ class SettingsActivity : Activity() {
     private lateinit var prefs: Prefs
     private lateinit var etKey: EditText
     private lateinit var etModel: EditText
+    private lateinit var etEleven: EditText
     private lateinit var etName: EditText
     private lateinit var etCc: EditText
     private lateinit var swConv: Switch
@@ -68,7 +69,8 @@ class SettingsActivity : Activity() {
         etName = makeField("¿Cómo quiere que le llame? (señor, Tony…)", if (prefs.userName == "señor") "" else prefs.userName); col.addView(etName)
         etCc = makeField("Prefijo de país para WhatsApp (34 = España)", prefs.countryCode, number = true); col.addView(etCc)
         col.addView(header("Voz de Janus"))
-        col.addView(note("Janus tiene una única voz, diseñada al estilo del asistente de la película. Necesita la clave de Gemini e internet; sin ellas no puede hablar (no usa ninguna otra voz)."))
+        col.addView(note("Voz tipo película: pegue aquí una clave gratuita de ElevenLabs (elevenlabs.io → Developers → API Keys). Janus usará la voz «Daniel», masculina y británica. Si la deja vacía, usa la voz de Gemini."))
+        etEleven = makeField("Clave de ElevenLabs", prefs.elevenKey, secret = true); col.addView(etEleven)
         col.addView(button("Probar voz") { testVoice() })
         swConv = switch("Modo conversación: sigue escuchando después de responder", prefs.conversationMode); col.addView(swConv)
         swWa = switch("Enviar WhatsApp automáticamente (requiere accesibilidad)", prefs.autoSendWhatsApp); col.addView(swWa)
@@ -120,6 +122,7 @@ class SettingsActivity : Activity() {
 
     private fun save() {
         prefs.apiKey = etKey.text.toString()
+        prefs.elevenKey = etEleven.text.toString()
         prefs.model = etModel.text.toString()
         prefs.userName = etName.text.toString()
         prefs.countryCode = etCc.text.toString()
@@ -136,7 +139,7 @@ class SettingsActivity : Activity() {
         }
         val name = prefs.userName
         val key = prefs.apiKey
-        if (key.isNotBlank() && !key.startsWith("sk-ant-")) toast("Generando la voz de JANUS…")
+        if (prefs.elevenKey.isNotBlank() || (key.isNotBlank() && !key.startsWith("sk-ant-"))) toast("Generando la voz de JANUS…")
         sp.stop()
         sp.speak("A su servicio, $name. Soy JANUS. Todos los sistemas están operativos.")
     }

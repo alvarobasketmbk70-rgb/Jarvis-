@@ -51,6 +51,8 @@ class Speaker(context: Context, onReady: (() -> Unit)? = null) {
     private var generation = 0
     @Volatile
     private var neuralBusy = false
+    @Volatile
+    private var pitch = 1.0f
 
     /** Se llama (en el hilo principal) con un motivo legible cuando la voz no se puede generar. */
     var onVoiceError: ((String) -> Unit)? = null
@@ -59,7 +61,7 @@ class Speaker(context: Context, onReady: (() -> Unit)? = null) {
 
     init {
         NeuralVoice.init(appCtx)
-        neuralKey()?.let { NeuralVoice.prewarm(it, prefs.neuralVoiceName, listOf("¿Sí, ${prefs.userName}?")) }
+        if (prefs.elevenKey.isBlank()) neuralKey()?.let { NeuralVoice.prewarm(it, prefs.neuralVoiceName, listOf("¿Sí, ${prefs.userName}?")) }
         main.post { onReady?.invoke() }
     }
 
@@ -85,14 +87,16 @@ class Speaker(context: Context, onReady: (() -> Unit)? = null) {
             return
         }
         val gen = ++generation
+        val elevenKey = prefs.elevenKey.takeIf { it.isNotBlank() }
         val key = neuralKey()
-        if (key == null) {
-            fail("falta la clave de Gemini. Péguela en ⚙ → «Clave de API».", done)
+        if (elevenKey == null && key == null) {
+            fail("falta la clave de voz. Péguela en ⚙ (ElevenLabs para la voz tipo película, o Gemini).", done)
             return
         }
         neuralBusy = true
         am.requestAudioFocus(focus)
-        val voice = prefs.neuralVoiceName
+        val voice = if (elevenKey != null) "eleven-" + ElevenVoice.VOICE_ID else prefs.neuralVoiceName
+        pitch = if (elevenKey != null) 1.0f else prefs.voicePitch
         Thread {
             var played = false
             val cached = NeuralVoice.cached(voice, clean)
@@ -101,9 +105,11 @@ class Speaker(context: Context, onReady: (() -> Unit)? = null) {
                 played = true
             } else {
                 val player = PcmPlayer(gen)
-                val complete = NeuralVoice.stream(key, voice, clean) { chunk ->
+                val sink: (ByteArray) -> Boolean = { chunk ->
                     if (gen != generation) false else { player.write(chunk); true }
                 }
+                val complete = if (elevenKey != null) ElevenVoice.stream(elevenKey, clean, sink)
+                else NeuralVoice.stream(key ?: "", voice, clean, sink)
                 if (player.bytes > 0) {
                     player.finish()
                     played = true
@@ -116,7 +122,7 @@ class Speaker(context: Context, onReady: (() -> Unit)? = null) {
             neuralBusy = false
             am.abandonAudioFocusRequest(focus)
             if (!played) {
-                fail(NeuralVoice.friendlyError(), done)
+                fail(if (elevenKey != null) ElevenVoice.friendlyError() else NeuralVoice.friendlyError(), done)
                 return@Thread
             }
             if (done != null) main.post { done() }
@@ -148,7 +154,6 @@ class Speaker(context: Context, onReady: (() -> Unit)? = null) {
                 .setBufferSizeInBytes(max(minBuf, 8192))
                 .build()
                 .also { t ->
-                    val pitch = prefs.voicePitch
                     if (pitch in 0.5f..1.5f && pitch != 1f) {
                         try { t.playbackParams = PlaybackParams().setPitch(pitch).setSpeed(1f) } catch (_: Exception) {}
                     }
@@ -470,6 +475,83 @@ object NeuralVoice {
                 }
             }
             return got
+        } finally {
+            conn.disconnect()
+        }
+    }
+}
+
+/**
+ * Voz de ElevenLabs: «Daniel», masculina, británica y con autoridad; la más parecida al
+ * asistente de la película. Se recibe en PCM 24 kHz, igual que la de Gemini.
+ */
+object ElevenVoice {
+    const val VOICE_ID = "onwK4e9ZLuTAKqWW03F9" // Daniel
+    private const val MODEL = "eleven_flash_v2_5"
+    @Volatile
+    var lastError: String? = null
+        private set
+    @Volatile
+    private var lastCode = 0
+
+    fun friendlyError(): String {
+        val e = lastError ?: "no se recibió audio"
+        return when {
+            lastCode == 401 -> "la clave de ElevenLabs no es válida. Revísela en ⚙."
+            lastCode == 402 || e.contains("quota", true) -> "se han agotado los caracteres gratuitos de ElevenLabs este mes."
+            lastCode == 429 -> "ElevenLabs está saturado o ha alcanzado el límite. Inténtelo en un momento."
+            e.contains("UnknownHost", true) || e.contains("timeout", true) -> "no hay conexión a internet."
+            else -> "no he podido generar la voz ($e)."
+        }
+    }
+
+    /** Pide el audio en streaming; [onChunk] recibe PCM según llega. True si llegó completo. */
+    fun stream(key: String, text: String, onChunk: (ByteArray) -> Boolean): Boolean {
+        val body = JSONObject()
+            .put("text", text)
+            .put("model_id", MODEL)
+            .put("language_code", "es")
+            .put(
+                "voice_settings", JSONObject()
+                    .put("stability", 0.65)
+                    .put("similarity_boost", 0.8)
+                    .put("style", 0.15)
+                    .put("use_speaker_boost", true)
+            )
+        val conn = URL("https://api.elevenlabs.io/v1/text-to-speech/$VOICE_ID/stream?output_format=pcm_24000")
+            .openConnection() as HttpURLConnection
+        try {
+            conn.requestMethod = "POST"
+            conn.connectTimeout = 8000
+            conn.readTimeout = 20000
+            conn.doOutput = true
+            conn.setRequestProperty("Content-Type", "application/json; charset=utf-8")
+            conn.setRequestProperty("Accept", "audio/pcm")
+            conn.setRequestProperty("xi-api-key", key)
+            conn.outputStream.use { it.write(body.toString().toByteArray(Charsets.UTF_8)) }
+            val code = conn.responseCode
+            if (code !in 200..299) {
+                lastCode = code
+                lastError = "error $code " + (conn.errorStream?.bufferedReader(Charsets.UTF_8)?.use { it.readText() }?.take(160) ?: "")
+                return false
+            }
+            var got = false
+            val buf = ByteArray(4096)
+            conn.inputStream.use { input ->
+                while (true) {
+                    val n = input.read(buf)
+                    if (n < 0) break
+                    if (n == 0) continue
+                    got = true
+                    if (!onChunk(buf.copyOf(n))) return true
+                }
+            }
+            if (got) { lastError = null; lastCode = 0 } else lastError = "respuesta sin audio"
+            return got
+        } catch (e: Exception) {
+            lastCode = 0
+            lastError = "${e.javaClass.simpleName} ${e.message ?: ""}"
+            return false
         } finally {
             conn.disconnect()
         }
