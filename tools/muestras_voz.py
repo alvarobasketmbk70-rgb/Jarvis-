@@ -5,11 +5,10 @@ KEY = os.environ.get("GEMINI_API_KEY", "").strip()
 if not KEY:
     sys.exit("Falta el secreto GEMINI_API_KEY")
 
-STYLE = ("Habla como J.A.R.V.I.S., el mayordomo digital de Iron Man: voz masculina grave, serena y elegante, "
-         "con un sutil toque de ironía británica. Ritmo ágil, dicción impecable, español de España, cercano pero formal.")
+STYLE = ("Eres J.A.R.V.I.S., una inteligencia artificial mayordomo de película de superhéroes. Voz masculina de tono medio, nítida, refinada y extremadamente serena, con aire de mayordomo inglés culto. Habla con precisión casi digital, sin prisa pero con fluidez, cortés y con un humor seco muy sutil. Nunca exagera las emociones. Español de España.")
 TEXT = ("Buenas tardes, señor. Todos los sistemas están operativos. He pausado su música y le he enviado el mensaje a "
         "su madre. ¿Desea algo más, o le dejo disfrutar de la tarde?")
-VOICES = ["Charon", "Orus", "Iapetus", "Algenib", "Alnilam", "Rasalgethi", "Schedar", "Fenrir",
+VOICES = ["Iapetus", "Charon", "Orus", "Algenib", "Alnilam", "Rasalgethi", "Schedar", "Fenrir",
           "Enceladus", "Umbriel", "Sadaltager", "Puck", "Kore", "Aoede"]
 MODELS = ["gemini-3.8-flash-tts", "gemini-3.1-flash-tts-preview"]
 

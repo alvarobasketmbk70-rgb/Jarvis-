@@ -212,9 +212,9 @@ class Speaker(context: Context, private val onReady: (() -> Unit)? = null) : Tex
 object NeuralVoice {
     const val SAMPLE_RATE = 24000
     val VOICES = listOf(
-        "Charon" to "Charon — grave y serena (recomendada)",
+        "Iapetus" to "Iapetus — nítida y refinada (la más parecida al Jarvis de la película)",
+        "Charon" to "Charon — grave y serena",
         "Orus" to "Orus — firme y segura",
-        "Iapetus" to "Iapetus — clara y elegante",
         "Algenib" to "Algenib — rasgada, madura",
         "Alnilam" to "Alnilam — firme, de locutor",
         "Rasalgethi" to "Rasalgethi — culta e informativa",
@@ -225,8 +225,7 @@ object NeuralVoice {
         "Aoede" to "Aoede — femenina, suave"
     )
     private const val STYLE =
-        "Habla como J.A.R.V.I.S., el mayordomo digital de Iron Man: voz masculina grave, serena y elegante, " +
-            "con un sutil toque de ironía británica. Ritmo ágil, dicción impecable, español de España, cercano pero formal."
+        "Eres J.A.R.V.I.S., una inteligencia artificial mayordomo de película de superhéroes. Voz masculina de tono medio, nítida, refinada y extremadamente serena, con aire de mayordomo inglés culto. Habla con precisión casi digital, sin prisa pero con fluidez, cortés y con un humor seco muy sutil. Nunca exagera las emociones. Español de España."
     private val MODELS = listOf("gemini-3.8-flash-tts", "gemini-3.1-flash-tts-preview")
     private val cache = object : LinkedHashMap<String, ByteArray>(32, 0.75f, true) {
         override fun removeEldestEntry(eldest: MutableMap.MutableEntry<String, ByteArray>?): Boolean = size > 30
