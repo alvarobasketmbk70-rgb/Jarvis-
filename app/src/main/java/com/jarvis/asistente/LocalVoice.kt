@@ -90,6 +90,10 @@ object LocalVoice {
         return try {
             val audio = synchronized(lock) { engine.generate(text = text, sid = 0, speed = speed) }
             val f = audio.samples
+            if (f.isEmpty() || audio.sampleRate <= 0) {
+                lastError = "el motor no generó audio (muestras=${f.size}, frecuencia=${audio.sampleRate}, frase=«${text.take(30)}»)"
+                return null
+            }
             val out = ByteArray(f.size * 2)
             for (i in f.indices) {
                 val v = (f[i].coerceIn(-1f, 1f) * 32767f).toInt()

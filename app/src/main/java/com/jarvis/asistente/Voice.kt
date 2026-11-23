@@ -129,7 +129,10 @@ class Speaker(context: Context, onReady: (() -> Unit)? = null) {
                     p.finish(); played = true
                 } else {
                     p?.release()
-                    if (reason == null) reason = "la voz incluida no se pudo cargar (${LocalVoice.lastError ?: "desconocido"})."
+                    val detail = p?.openError
+                        ?: LocalVoice.lastError
+                        ?: if (gen != generation) "interrumpida" else "estado del motor: ${LocalVoice.state}"
+                    reason = (reason?.let { "$it Y además, " } ?: "") + "la voz incluida falló: $detail."
                 }
             }
             if (gen != generation) return@Thread
@@ -151,6 +154,8 @@ class Speaker(context: Context, onReady: (() -> Unit)? = null) {
         private val fx: AiVoiceFx? = if (prefs.aiEffect) AiVoiceFx(rate) else null
         var bytes = 0
             private set
+
+        var openError: String? = null
 
         private fun open(): AudioTrack? = try {
             val minBuf = AudioTrack.getMinBufferSize(rate, AudioFormat.CHANNEL_OUT_MONO, AudioFormat.ENCODING_PCM_16BIT)
@@ -174,6 +179,7 @@ class Speaker(context: Context, onReady: (() -> Unit)? = null) {
                     t.play()
                 }
         } catch (e: Exception) {
+            openError = "no se pudo abrir la salida de audio (${e.javaClass.simpleName}: ${e.message ?: ""}, frecuencia=$rate)"
             null
         }
 
