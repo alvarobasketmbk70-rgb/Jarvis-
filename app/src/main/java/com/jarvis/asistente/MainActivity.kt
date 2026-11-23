@@ -74,6 +74,7 @@ class MainActivity : Activity() {
         if (prefs.apiKey.isBlank()) {
             addBubble("Consejo: en ⚙ puede añadir una clave de IA gratuita para conversar conmigo y activar la accesibilidad para que pueda tocar la pantalla por usted.", false)
         }
+        if (!LocalVoice.isReady) watchVoice(addBubble("Preparando la voz de JANUS… (solo tarda la primera vez)", false))
         if (prefs.wakeWord && hasMic()) WakeWordService.start(this)
         if (prefs.wakeWord && !android.provider.Settings.canDrawOverlays(this)) {
             addBubble("Para que aparezca sobre cualquier app al decir «Oye Janus», toque aquí y active «Mostrar sobre otras apps» para Janus.", false)
@@ -120,6 +121,18 @@ class MainActivity : Activity() {
         speaker.shutdown()
         main.removeCallbacksAndMessages(null)
         super.onDestroy()
+    }
+
+    private fun watchVoice(bubble: TextView, waited: Int = 0) {
+        main.postDelayed({
+            when {
+                LocalVoice.isReady -> bubble.text = "Voz de JANUS lista."
+                LocalVoice.state.startsWith("error") ->
+                    bubble.text = "⚠ No se pudo cargar la voz de JANUS: ${LocalVoice.state.removePrefix("error: ")}"
+                waited > 120 -> bubble.text = "La voz está tardando más de lo normal en prepararse…"
+                else -> watchVoice(bubble, waited + 1)
+            }
+        }, 500)
     }
 
     private fun wantsListen(i: Intent?): Boolean =

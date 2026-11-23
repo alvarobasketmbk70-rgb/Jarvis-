@@ -43,6 +43,7 @@ class SettingsActivity : Activity() {
     private val pitches = listOf(1.0f to "Tono normal", 0.94f to "Algo más grave (recomendado)", 0.88f to "Grave", 0.82f to "Muy grave")
     private var speaker: Speaker? = null
     private lateinit var tvAcc: TextView
+    private lateinit var tvVoice: TextView
     private var tts: TextToSpeech? = null
 
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -71,6 +72,7 @@ class SettingsActivity : Activity() {
         col.addView(header("Voz de Janus"))
         col.addView(note("La voz de Janus viene incluida en la app: es gratis, sin límites y funciona sin internet. Opcional: si pega una clave de ElevenLabs, usará en su lugar la voz «Daniel» (británica, más de película), con su límite mensual gratuito."))
         etEleven = makeField("Clave de ElevenLabs", prefs.elevenKey, secret = true); col.addView(etEleven)
+        tvVoice = note(""); col.addView(tvVoice)
         col.addView(button("Probar voz") { testVoice() })
         swConv = switch("Modo conversación: sigue escuchando después de responder", prefs.conversationMode); col.addView(swConv)
         swWa = switch("Enviar WhatsApp automáticamente (requiere accesibilidad)", prefs.autoSendWhatsApp); col.addView(swWa)
@@ -103,8 +105,19 @@ class SettingsActivity : Activity() {
         setContentView(sv)
     }
 
+    private fun refreshVoiceState() {
+        tvVoice.text = "Estado de la voz incluida: " + when {
+            LocalVoice.isReady -> "✅ lista"
+            LocalVoice.state == "preparando" -> "⏳ preparándose…"
+            LocalVoice.state.startsWith("error") -> "⚠ " + LocalVoice.state
+            else -> "sin preparar (se prepara al usarla)"
+        }
+        if (!LocalVoice.isReady && !LocalVoice.state.startsWith("error")) tvVoice.postDelayed({ refreshVoiceState() }, 700)
+    }
+
     override fun onResume() {
         super.onResume()
+        refreshVoiceState()
         tvAcc.text = if (JarvisAccessibilityService.instance != null) "✅ Accesibilidad activada"
         else "⚠️ Accesibilidad desactivada: es necesaria para pulsar botones, desplazarse, leer la pantalla y enviar WhatsApp automáticamente."
     }

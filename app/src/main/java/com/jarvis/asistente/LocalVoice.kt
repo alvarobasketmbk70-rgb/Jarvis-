@@ -38,31 +38,47 @@ object LocalVoice {
         for (name in list) copyAssets(ctx, "$path/$name", File(dest, name))
     }
 
+    /** Estado legible para mostrar al usuario. */
+    @Volatile
+    var state: String = "sin preparar"
+        private set
+    val isReady: Boolean get() = tts != null
+
     private fun ensure(ctx: Context): OfflineTts? {
         tts?.let { return it }
         synchronized(lock) {
             tts?.let { return it }
             return try {
-                val dir = File(ctx.filesDir, ASSET)
-                val marker = File(dir, ".version")
-                if (!marker.exists() || marker.readText() != VERSION) {
-                    dir.deleteRecursively()
-                    copyAssets(ctx, ASSET, dir)
+                state = "preparando"
+                // Solo los datos de pronunciación (espeak) necesitan estar como archivos;
+                // el modelo de voz se lee directamente de la app, sin copiarlo.
+                val dataDir = File(ctx.filesDir, "espeak-ng-data")
+                val marker = File(ctx.filesDir, "espeak-ng-data.version")
+                if (!marker.exists() || marker.readText() != VERSION || !dataDir.isDirectory) {
+                    dataDir.deleteRecursively()
+                    copyAssets(ctx, "$ASSET/espeak-ng-data", dataDir)
                     marker.writeText(VERSION)
                 }
-                val onnx = dir.listFiles()?.firstOrNull { it.name.endsWith(".onnx") }
-                    ?: throw IllegalStateException("falta el modelo de voz")
+                // Limpieza de la versión anterior, que copiaba todo el modelo.
+                File(ctx.filesDir, ASSET).deleteRecursively()
+                val onnx = ctx.assets.list(ASSET)?.firstOrNull { it.endsWith(".onnx") }
+                    ?: throw IllegalStateException("falta el modelo de voz en la app")
                 val vits = OfflineTtsVitsModelConfig(
-                    model = onnx.absolutePath,
-                    tokens = File(dir, "tokens.txt").absolutePath,
-                    dataDir = File(dir, "espeak-ng-data").absolutePath
+                    model = "$ASSET/$onnx",
+                    tokens = "$ASSET/tokens.txt",
+                    dataDir = dataDir.absolutePath
                 )
                 val config = OfflineTtsConfig(
                     model = OfflineTtsModelConfig(vits = vits, numThreads = 2, debug = false, provider = "cpu")
                 )
-                OfflineTts(config = config).also { tts = it; lastError = null }
+                OfflineTts(ctx.assets, config).also {
+                    tts = it
+                    lastError = null
+                    state = "lista"
+                }
             } catch (e: Throwable) {
-                lastError = e.message ?: e.javaClass.simpleName
+                lastError = "${e.javaClass.simpleName}: ${e.message ?: ""}"
+                state = "error: $lastError"
                 null
             }
         }
