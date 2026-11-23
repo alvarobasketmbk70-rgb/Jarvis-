@@ -1,0 +1,28 @@
+name: Probar voces Kokoro
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  probar:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Descargar Kokoro
+        run: |
+          for n in kokoro-int8-multi-lang-v1_1 kokoro-int8-multi-lang-v1_0 kokoro-multi-lang-v1_1 kokoro-multi-lang-v1_0; do
+            if curl -fsL -o k.tar.bz2 https://github.com/k2-fsa/sherpa-onnx/releases/download/tts-models/$n.tar.bz2; then echo "MODELO $n"; tar xjf k.tar.bz2; mv $n kokoro; du -sh kokoro; break; fi
+          done
+      - name: Generar muestras
+        run: |
+          pip install -q "sherpa-onnx==1.13.8" numpy
+          python3 tools/probar_kokoro.py kokoro
+      - name: Publicar
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release delete voces-kokoro --yes --cleanup-tag || true
+          gh release create voces-kokoro muestras/*.wav --title "Voces candidatas para JANUS (Kokoro)" --notes "Toque cada archivo para escucharlo."
