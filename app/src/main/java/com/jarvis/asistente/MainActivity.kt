@@ -111,6 +111,7 @@ class MainActivity : Activity() {
         stopListening()
         WakeWordService.appInForeground = false
         BeepMuter.unmuteNow(this)
+        if (WakeWordService.instance == null && prefs.wakeWord && hasMic()) WakeWordService.start(this)
         WakeWordService.instance?.setPaused(false)
         super.onPause()
     }

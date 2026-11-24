@@ -161,6 +161,18 @@ class WakeWordService : Service() {
         else registerReceiver(screenReceiver, filter)
         receiverOn = true
         loadModel()
+        main.postDelayed(watchdog, 20_000)
+    }
+
+    /** Vigilante: cada 20 s comprueba que el micrófono sigue vivo y, si no, lo reinicia. */
+    private val watchdog = object : Runnable {
+        override fun run() {
+            if (destroyed) return
+            val l = loop
+            if (l != null && !l.isAlive) loop = null
+            if (!inInteraction) ensureLoop()
+            main.postDelayed(this, 20_000)
+        }
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
@@ -472,6 +484,8 @@ class WakeWordService : Service() {
                 }
             } catch (_: Exception) {
             } finally {
+                // Si el micrófono se cortó (otra app lo usó, una llamada…), se vuelve a abrir solo.
+                if (running) main.postDelayed({ if (loop === this) { loop = null; ensureLoop() } }, 2000)
                 try { r.stop() } catch (_: Exception) {}
                 r.release()
                 try { aec?.release() } catch (_: Exception) {}

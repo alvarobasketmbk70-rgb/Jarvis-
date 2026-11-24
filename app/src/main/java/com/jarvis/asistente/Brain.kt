@@ -292,10 +292,10 @@ object LlmClient {
                 return sb.toString().replace(Regex("\\[[0-9, ]+\\]"), "").replace(Regex("[*#_`]"), "").trim()
             } catch (e: HttpError) {
                 last = e
-                if (e.code != 404 && e.code != 400) throw e
+                if (e.code != 404 && e.code != 400 && !transient(e.code)) throw e
             }
         }
-        throw last ?: HttpError(404, "sin modelo")
+        throw last ?: HttpError(503, "sin modelo disponible")
     }
 
     /** Envía el audio del usuario a Gemini, que lo entiende y responde en un solo paso. */
@@ -306,36 +306,51 @@ object LlmClient {
         return gemini(key, model, system, history, "", parts)
     }
 
+    /** Errores pasajeros de Google (saturación, mantenimiento, límite momentáneo): se reintenta con otro modelo. */
+    private fun transient(code: Int) = code == 429 || code == 500 || code == 502 || code == 503 || code == 504
+
     private fun gemini(
         key: String, model: String, system: String, history: List<Pair<String, String>>, user: String,
         userParts: JSONArray? = null
     ): String {
-        val models = if (model.isNotBlank()) listOf(model) else geminiModel?.let { listOf(it) } ?: FAST_MODELS
+        // El modelo que funcionó la última vez va primero, pero los demás siguen de reserva.
+        val preferred = geminiModel
+        val models = if (model.isNotBlank()) listOf(model)
+        else (listOfNotNull(preferred) + FAST_MODELS).distinct()
         var last: Exception? = null
-        for (m in models) {
-            try {
-                val r = geminiCall(key, m, system, history, user, thinkingOk, userParts)
-                if (model.isBlank()) geminiModel = m
-                return r
-            } catch (e: HttpError) {
-                last = e
-                if (e.code == 400 && thinkingOk) {
-                    try {
-                        val r = geminiCall(key, m, system, history, user, false, userParts)
-                        thinkingOk = false
-                        if (model.isBlank()) geminiModel = m
-                        return r
-                    } catch (e2: HttpError) {
-                        last = e2
-                        if (e2.code != 404) throw e2
+        for (round in 0 until 2) {
+            for (m in models) {
+                try {
+                    val r = geminiCall(key, m, system, history, user, thinkingOk, userParts)
+                    if (model.isBlank()) geminiModel = m
+                    return r
+                } catch (e: HttpError) {
+                    last = e
+                    when {
+                        e.code == 400 && thinkingOk -> {
+                            try {
+                                val r = geminiCall(key, m, system, history, user, false, userParts)
+                                thinkingOk = false
+                                if (model.isBlank()) geminiModel = m
+                                return r
+                            } catch (e2: HttpError) {
+                                last = e2
+                                if (e2.code != 404 && !transient(e2.code)) throw e2
+                            }
+                        }
+                        e.code == 404 || transient(e.code) -> {} // probar el siguiente modelo
+                        else -> throw e
                     }
-                } else if (e.code != 404) {
-                    throw e
+                } catch (e: java.net.SocketTimeoutException) {
+                    last = e
                 }
             }
+            // Todos saturados: una pequeña espera y otra vuelta.
+            Thread.sleep(900)
         }
-        throw last ?: HttpError(404, "sin modelo")
+        throw last ?: HttpError(503, "sin modelo disponible")
     }
+
 
     private fun geminiCall(
         key: String, m: String, system: String, history: List<Pair<String, String>>, user: String, minimalThinking: Boolean,
@@ -423,6 +438,8 @@ object LlmClient {
             e.code == 404 -> "El modelo configurado no existe. Deje el campo de modelo vacío en ajustes."
             e.code == 429 -> "He superado el límite de uso de la API. Inténtelo en un momento."
             e.code == 400 -> "La petición no es válida; revise el modelo en ajustes."
+            e.code == 503 || e.code == 500 || e.code == 502 || e.code == 504 ->
+                "Los servidores de Google están saturados ahora mismo. Inténtelo de nuevo en unos segundos."
             else -> "Error ${e.code}."
         }
         is UnknownHostException -> "No hay conexión a internet."
