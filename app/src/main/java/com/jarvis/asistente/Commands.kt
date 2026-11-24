@@ -269,7 +269,10 @@ object Commands {
         YT2.find(p)?.let { return act("youtube", "query" to u.g(it, 1)) }
         NAV.find(p)?.let { return act("navigate", "destination" to u.g(it, 1)) }
         NEAR.find(p)?.let { return act("maps_search", "query" to u.g(it, 1)) }
-        WEB.find(p)?.let { return act("web_search", "query" to u.g(it, 1)) }
+        if (Regex("^(abre|busca en|buscame en) (google|el navegador|chrome)").containsMatchIn(p)) {
+            WEB.find(p)?.let { return act("web_search", "query" to u.g(it, 1)) }
+        }
+        WEB.find(p)?.let { return act("web_answer", "query" to u.g(it, 1)) }
         return null
     }
 

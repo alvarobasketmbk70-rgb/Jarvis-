@@ -52,6 +52,9 @@ class Prefs(context: Context) {
     var voicePitch: Float
         get() = 0.92f
         set(v) = sp.edit().putFloat("voice_pitch", v).apply()
+    var listenScreenOff: Boolean
+        get() = sp.getBoolean("listen_screen_off", true)
+        set(v) = sp.edit().putBoolean("listen_screen_off", v).apply()
     var wakeWord: Boolean
         get() = sp.getBoolean("wake_word", true)
         set(v) = sp.edit().putBoolean("wake_word", v).apply()

@@ -56,6 +56,61 @@ class Brain(context: Context) {
         askLlm(text, cb)
     }
 
+    /**
+     * Como un chat de voz: el audio va directo a Gemini, que transcribe y responde a la vez.
+     * Las órdenes conocidas y las respuestas a preguntas pendientes siguen el camino local.
+     * Sin clave de Gemini se usa la transcripción local ([fallbackText]).
+     */
+    fun processAudio(pcm: ByteArray, fallbackText: String, cb: (String, Reply) -> Unit) {
+        val key = prefs.apiKey
+        if (key.isBlank() || key.startsWith("sk-ant-") || pcm.isEmpty()) {
+            val t = fallbackText.trim()
+            if (t.isEmpty()) { cb("", Reply(null)); return }
+            process(t) { r -> cb(t, r) }
+            return
+        }
+        val hist = ArrayList(history)
+        val system = systemPrompt() + AUDIO_EXTRA
+        val model = prefs.model
+        Thread {
+            var heard = fallbackText.trim()
+            var reply: Reply? = null
+            try {
+                val raw = LlmClient.askAudio(key, model, system, hist, wav(pcm))
+                val o = JSONObject(raw.substring(raw.indexOf('{'), raw.lastIndexOf('}') + 1))
+                heard = o.optString("heard", "").trim()
+                reply = parseLlm(raw)
+            } catch (e: Exception) {
+                lastAudioError = LlmClient.friendly(e)
+            }
+            main.post {
+                if (heard.isEmpty()) {
+                    cb("", Reply(null)); return@post
+                }
+                val r = reply
+                if (r == null || pending != null || Commands.parse(heard) != null) process(heard) { x -> cb(heard, x) }
+                else routeInternal(r) { x -> cb(heard, x) }
+            }
+        }.start()
+    }
+
+    var lastAudioError: String = ""
+
+    private fun wav(pcm: ByteArray, rate: Int = 16000): ByteArray {
+        val out = java.io.ByteArrayOutputStream(pcm.size + 44)
+        fun i32(v: Int) { out.write(v and 0xFF); out.write((v shr 8) and 0xFF); out.write((v shr 16) and 0xFF); out.write((v shr 24) and 0xFF) }
+        fun i16(v: Int) { out.write(v and 0xFF); out.write((v shr 8) and 0xFF) }
+        out.write("RIFF".toByteArray()); i32(36 + pcm.size); out.write("WAVE".toByteArray())
+        out.write("fmt ".toByteArray()); i32(16); i16(1); i16(1); i32(rate); i32(rate * 2); i16(2); i16(16)
+        out.write("data".toByteArray()); i32(pcm.size); out.write(pcm)
+        return out.toByteArray()
+    }
+
+    private val AUDIO_EXTRA = """
+
+El usuario te habla por voz: recibirás directamente su audio. Puede empezar con la palabra de activación «Oye Janus» u «Hola Janus» (se pronuncia «Yanus»): ignórala. Añade SIEMPRE al JSON el campo "heard" con la transcripción literal, en español, de lo que el usuario pide (sin la palabra de activación). Si en el audio no hay ninguna petición (solo ruido, música o silencio), devuelve "heard" vacío y "say" vacío.
+"""
+
     fun remember(user: String, assistant: String) {
         if (assistant.isBlank()) return
         history.add(user to assistant)
@@ -72,6 +127,22 @@ class Brain(context: Context) {
             is Parse.Do -> when (parse.action.type) {
                 "repeat" -> cb(Reply(lastSpoken.ifBlank { "Aún no he dicho nada." }))
                 "shutup" -> cb(Reply(null, silent = true))
+                "web_answer" -> {
+                    val q = parse.action.arg("query")
+                    val key = prefs.apiKey
+                    if (key.isBlank() || key.startsWith("sk-ant-")) {
+                        cb(Reply(null, Action("web_search", mapOf("query" to q))))
+                    } else {
+                        Thread {
+                            val text = try {
+                                LlmClient.webAnswer(key, q, prefs.userName).ifBlank { "No he encontrado nada concluyente sobre eso." }
+                            } catch (e: Exception) {
+                                "No he podido buscarlo en internet. ${LlmClient.friendly(e)}"
+                            }
+                            main.post { cb(Reply(text)) }
+                        }.start()
+                    }
+                }
                 "briefing", "weather" -> {
                     val type = parse.action.type
                     Thread {
@@ -82,6 +153,14 @@ class Brain(context: Context) {
                 else -> cb(Reply(parse.say, action = parse.action))
             }
         }
+    }
+
+    /** Acciones que se resuelven dentro del cerebro (consultas en segundo plano). */
+    private val INTERNAL = setOf("web_answer", "briefing", "weather")
+
+    private fun routeInternal(r: Reply, cb: (Reply) -> Unit) {
+        val a = r.action
+        if (a != null && a.type in INTERNAL) handleParse(Parse.Do(a), cb) else cb(r)
     }
 
     private fun askLlm(text: String, cb: (Reply) -> Unit) {
@@ -99,7 +178,7 @@ class Brain(context: Context) {
             } catch (e: Exception) {
                 Reply("Lo siento, no he podido conectar con mi cerebro en la nube. ${LlmClient.friendly(e)}")
             }
-            main.post { cb(reply) }
+            main.post { routeInternal(reply, cb) }
         }.start()
     }
 
@@ -157,7 +236,8 @@ Acciones disponibles:
 {"type":"timer","seconds":"300"}
 {"type":"flashlight","on":"true|false"}
 {"type":"volume","cmd":"up|down|mute|unmute|max"} o {"type":"volume","level":"0-100"}
-{"type":"web_search","query":"..."}
+{"type":"web_answer","query":"pregunta completa"}   (busca en internet y responde en voz alta: úsalo para noticias, resultados, precios, horarios, tiempo en otras ciudades, datos actuales o cualquier cosa que no sepas con seguridad)
+{"type":"web_search","query":"..."}   (solo si pide expresamente abrir la búsqueda en el navegador)
 {"type":"navigate","destination":"dirección o lugar"}
 {"type":"maps_search","query":"farmacia"}
 {"type":"click","text":"texto del botón visible en pantalla"}
@@ -167,7 +247,8 @@ Acciones disponibles:
 {"type":"read_screen"}
 {"type":"time"} {"type":"date"} {"type":"battery"} {"type":"wifi"} {"type":"bluetooth"}
 
-Si piden algo que no puedes hacer con estas acciones, dilo con elegancia y propone una alternativa. No inventes datos en tiempo real (tiempo, noticias, resultados deportivos): para eso usa web_search.
+TRADUCTOR: si te piden traducir algo, pon en "say" únicamente la traducción, en el idioma pedido, sin explicaciones. Si piden «modo traductor» o «traduce lo que diga», responde que está activado, pon "listen": true y, en los turnos siguientes, traduce cada frase que oigas (del español al idioma elegido y viceversa) con "listen": true, hasta que digan «fin del traductor» o «para».
+Si piden algo que no puedes hacer con estas acciones, dilo con elegancia y propone una alternativa. No inventes datos en tiempo real: para eso usa web_answer.
 """.trimIndent()
     }
 }
@@ -189,19 +270,58 @@ object LlmClient {
     private val FAST_MODELS = listOf("gemini-flash-latest", "gemini-3.5-flash-lite", "gemini-flash-lite-latest")
 
     /** Usa el modelo más rápido disponible (Flash-Lite) con el razonamiento al mínimo. */
-    private fun gemini(key: String, model: String, system: String, history: List<Pair<String, String>>, user: String): String {
+    /** Responde a una pregunta buscando en internet (Búsqueda de Google integrada en Gemini). */
+    fun webAnswer(key: String, question: String, name: String): String {
+        val sys = "Eres JANUS, el asistente personal de $name: formal, educado y con un toque de ironía británica. " +
+            "Usa la búsqueda de Google para dar datos actuales y correctos. Responde en español de España, en 1 a 3 frases breves " +
+            "para leer en voz alta, tratando de usted. Sin markdown, sin listas, sin URLs y sin referencias entre corchetes."
+        val body = JSONObject()
+            .put("systemInstruction", JSONObject().put("parts", part(sys)))
+            .put("contents", JSONArray().put(JSONObject().put("role", "user").put("parts", part(question))))
+            .put("tools", JSONArray().put(JSONObject().put("google_search", JSONObject())))
+        var last: Exception? = null
+        for (m in listOf("gemini-flash-latest", "gemini-3.5-flash-lite", "gemini-flash-lite-latest")) {
+            try {
+                val res = post("https://generativelanguage.googleapis.com/v1beta/models/$m:generateContent", body.toString(), mapOf("x-goog-api-key" to key))
+                val parts = JSONObject(res).getJSONArray("candidates").getJSONObject(0).getJSONObject("content").getJSONArray("parts")
+                val sb = StringBuilder()
+                for (i in 0 until parts.length()) {
+                    val p = parts.getJSONObject(i)
+                    if (!p.optBoolean("thought", false)) sb.append(p.optString("text", ""))
+                }
+                return sb.toString().replace(Regex("\\[[0-9, ]+\\]"), "").replace(Regex("[*#_`]"), "").trim()
+            } catch (e: HttpError) {
+                last = e
+                if (e.code != 404 && e.code != 400) throw e
+            }
+        }
+        throw last ?: HttpError(404, "sin modelo")
+    }
+
+    /** Envía el audio del usuario a Gemini, que lo entiende y responde en un solo paso. */
+    fun askAudio(key: String, model: String, system: String, history: List<Pair<String, String>>, wav: ByteArray): String {
+        val parts = JSONArray()
+            .put(JSONObject().put("inlineData", JSONObject().put("mimeType", "audio/wav").put("data", android.util.Base64.encodeToString(wav, android.util.Base64.NO_WRAP))))
+            .put(JSONObject().put("text", "(Audio del usuario. Responde con el JSON indicado.)"))
+        return gemini(key, model, system, history, "", parts)
+    }
+
+    private fun gemini(
+        key: String, model: String, system: String, history: List<Pair<String, String>>, user: String,
+        userParts: JSONArray? = null
+    ): String {
         val models = if (model.isNotBlank()) listOf(model) else geminiModel?.let { listOf(it) } ?: FAST_MODELS
         var last: Exception? = null
         for (m in models) {
             try {
-                val r = geminiCall(key, m, system, history, user, thinkingOk)
+                val r = geminiCall(key, m, system, history, user, thinkingOk, userParts)
                 if (model.isBlank()) geminiModel = m
                 return r
             } catch (e: HttpError) {
                 last = e
                 if (e.code == 400 && thinkingOk) {
                     try {
-                        val r = geminiCall(key, m, system, history, user, false)
+                        val r = geminiCall(key, m, system, history, user, false, userParts)
                         thinkingOk = false
                         if (model.isBlank()) geminiModel = m
                         return r
@@ -218,14 +338,15 @@ object LlmClient {
     }
 
     private fun geminiCall(
-        key: String, m: String, system: String, history: List<Pair<String, String>>, user: String, minimalThinking: Boolean
+        key: String, m: String, system: String, history: List<Pair<String, String>>, user: String, minimalThinking: Boolean,
+        userParts: JSONArray? = null
     ): String {
         val contents = JSONArray()
         for ((u, a) in history) {
             contents.put(JSONObject().put("role", "user").put("parts", part(u)))
             contents.put(JSONObject().put("role", "model").put("parts", part(a)))
         }
-        contents.put(JSONObject().put("role", "user").put("parts", part(user)))
+        contents.put(JSONObject().put("role", "user").put("parts", userParts ?: part(user)))
         val gen = JSONObject()
             .put("responseMimeType", "application/json")
             .put("maxOutputTokens", 400)
@@ -280,7 +401,7 @@ object LlmClient {
         try {
             c.requestMethod = "POST"
             c.connectTimeout = 8000
-            c.readTimeout = 25000
+            c.readTimeout = 30000
             c.doOutput = true
             c.setRequestProperty("Content-Type", "application/json; charset=utf-8")
             for ((k, v) in headers) c.setRequestProperty(k, v)

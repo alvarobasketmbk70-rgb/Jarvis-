@@ -36,6 +36,7 @@ class SettingsActivity : Activity() {
     private lateinit var swConv: Switch
     private lateinit var swWa: Switch
     private lateinit var swWake: Switch
+    private lateinit var swScreenOff: Switch
     private lateinit var spNeural: Spinner
     private lateinit var swNeural: Switch
     private lateinit var swFx: Switch
@@ -77,6 +78,7 @@ class SettingsActivity : Activity() {
         swConv = switch("Modo conversación: sigue escuchando después de responder", prefs.conversationMode); col.addView(swConv)
         swWa = switch("Enviar WhatsApp automáticamente (requiere accesibilidad)", prefs.autoSendWhatsApp); col.addView(swWa)
         swWake = switch("Responder a «Oye Janus» con la app cerrada (con la pantalla encendida; gasta algo de batería)", prefs.wakeWord); col.addView(swWake)
+        swScreenOff = switch("Escuchar también con el móvil bloqueado y la pantalla apagada (como Siri; consume más batería)", prefs.listenScreenOff); col.addView(swScreenOff)
         swWake.setOnCheckedChangeListener { _, on ->
             if (on && checkSelfPermission(Manifest.permission.RECORD_AUDIO) != PackageManager.PERMISSION_GRANTED) {
                 toast("Primero conceda el permiso de micrófono abriendo Janus.")
@@ -97,7 +99,7 @@ class SettingsActivity : Activity() {
         col.addView(button("3. Mostrar sobre otras apps") {
             open(Intent(Settings.ACTION_MANAGE_OVERLAY_PERMISSION, Uri.parse("package:$packageName")))
         })
-        col.addView(button("4. Otros permisos Xiaomi (ventanas en segundo plano)") { openMiuiPerms() })
+        col.addView(button("4. Otros permisos Xiaomi (pantalla de bloqueo y ventanas en segundo plano)") { openMiuiPerms() })
         col.addView(button("5. Sin restricciones de batería") { requestBattery() })
         col.addView(button("6. Poner Janus como asistente predeterminado") { openDefaultAssistant() })
         col.addView(note("Con el paso 6, al mantener pulsado el botón de encendido (o deslizar desde una esquina inferior) se abrirá Janus escuchando. También puede añadir el botón «Janus» en los ajustes rápidos."))
@@ -140,6 +142,7 @@ class SettingsActivity : Activity() {
         prefs.userName = etName.text.toString()
         prefs.countryCode = etCc.text.toString()
         prefs.conversationMode = swConv.isChecked
+        prefs.listenScreenOff = swScreenOff.isChecked
         prefs.autoSendWhatsApp = swWa.isChecked
     }
 
@@ -173,7 +176,7 @@ class SettingsActivity : Activity() {
         val i = Intent("miui.intent.action.APP_PERM_EDITOR")
             .setClassName("com.miui.securitycenter", "com.miui.permcenter.permissions.PermissionsEditorActivity")
             .putExtra("extra_pkgname", packageName)
-        if (open(i)) toast("Active «Mostrar ventanas emergentes mientras se ejecuta en segundo plano».")
+        if (open(i)) toast("Active «Mostrar en pantalla de bloqueo» y «Mostrar ventanas emergentes mientras se ejecuta en segundo plano».")
         else openAppDetails()
     }
 
