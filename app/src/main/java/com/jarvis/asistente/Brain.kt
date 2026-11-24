@@ -61,35 +61,70 @@ class Brain(context: Context) {
      * Las órdenes conocidas y las respuestas a preguntas pendientes siguen el camino local.
      * Sin clave de Gemini se usa la transcripción local ([fallbackText]).
      */
+    /** Órdenes que se pueden ejecutar con la transcripción local, sin esperar a internet. */
+    private val LOCAL_FAST = setOf(
+        "media", "flashlight", "time", "date", "battery", "volume", "timer", "alarm", "alarms_open", "global",
+        "scroll", "briefing", "weather", "wifi", "bluetooth", "airplane", "shutup", "repeat", "jarvis_settings", "open_app"
+    )
+
+    private fun geminiKey(): String? = prefs.apiKey.takeIf { it.isNotBlank() && !it.startsWith("sk-ant-") }
+    private fun groqKey(): String? = prefs.groqKey.takeIf { it.isNotBlank() }
+
+    /**
+     * Entiende una orden hablada lo más rápido posible:
+     *  1. Si la transcripción local ya es una orden conocida e inequívoca, se ejecuta al instante.
+     *  2. Con clave de Groq: Whisper transcribe en décimas de segundo y se responde.
+     *  3. Si no, Gemini escucha el audio y responde en un paso.
+     *  Cada paso tiene reserva en el siguiente; nada se queda colgado.
+     */
     fun processAudio(pcm: ByteArray, fallbackText: String, cb: (String, Reply) -> Unit) {
-        val key = prefs.apiKey
-        if (key.isBlank() || key.startsWith("sk-ant-") || pcm.isEmpty()) {
-            val t = fallbackText.trim()
-            if (t.isEmpty()) { cb("", Reply(null)); return }
-            process(t) { r -> cb(t, r) }
+        val local = fallbackText.trim()
+        val localParse = if (local.isNotEmpty() && pending == null) Commands.parse(local) else null
+        if (localParse is Parse.Do && localParse.action.type in LOCAL_FAST) {
+            process(local) { r -> cb(local, r) }
+            return
+        }
+        val groq = groqKey()
+        val gem = geminiKey()
+        if (pcm.isEmpty() || (groq == null && gem == null)) {
+            if (local.isEmpty()) { cb("", Reply(null)); return }
+            process(local) { r -> cb(local, r) }
             return
         }
         val hist = ArrayList(history)
         val system = systemPrompt() + AUDIO_EXTRA
         val model = prefs.model
+        val audio = wav(pcm)
         Thread {
-            var heard = fallbackText.trim()
+            var heard = ""
             var reply: Reply? = null
-            try {
-                val raw = LlmClient.askAudio(key, model, system, hist, wav(pcm))
-                val o = JSONObject(raw.substring(raw.indexOf('{'), raw.lastIndexOf('}') + 1))
-                heard = o.optString("heard", "").trim()
-                reply = parseLlm(raw)
-            } catch (e: Exception) {
-                lastAudioError = LlmClient.friendly(e)
+            var err = ""
+            if (groq != null) {
+                try { heard = Groq.transcribe(groq, audio) } catch (e: Exception) { err = LlmClient.friendly(e) }
             }
+            if (heard.isEmpty() && gem != null) {
+                try {
+                    val raw = LlmClient.askAudio(gem, model, system, hist, audio)
+                    val o = JSONObject(raw.substring(raw.indexOf('{'), raw.lastIndexOf('}') + 1))
+                    heard = o.optString("heard", "").trim()
+                    reply = parseLlm(raw)
+                    err = ""
+                } catch (e: Exception) {
+                    if (err.isEmpty()) err = LlmClient.friendly(e)
+                }
+            }
+            if (heard.isEmpty() && err.isNotEmpty()) heard = local // último recurso: transcripción local
+            // Whisper a veces «oye» frases fantasma en silencio
+            if (heard.matches(Regex("(?i)^(gracias( por ver(lo)?)?|subtítulos.*|amara\\.org.*|\\W*)$"))) heard = ""
+            if (heard.isEmpty()) lastAudioError = err
+            val h = heard.replace(Regex("(?i)^\\W*(oye|hola|hey)?\\W*(janus|yanus|llanus|jano)\\W*"), "").trim()
             main.post {
-                if (heard.isEmpty()) {
+                if (h.isEmpty()) {
                     cb("", Reply(null)); return@post
                 }
                 val r = reply
-                if (r == null || pending != null || Commands.parse(heard) != null) process(heard) { x -> cb(heard, x) }
-                else routeInternal(r) { x -> cb(heard, x) }
+                if (r == null || pending != null || Commands.parse(h) != null) process(h) { x -> cb(h, x) }
+                else routeInternal(r) { x -> cb(h, x) }
             }
         }.start()
     }
@@ -129,17 +164,24 @@ El usuario te habla por voz: recibirás directamente su audio. Puede empezar con
                 "shutup" -> cb(Reply(null, silent = true))
                 "web_answer" -> {
                     val q = parse.action.arg("query")
-                    val key = prefs.apiKey
-                    if (key.isBlank() || key.startsWith("sk-ant-")) {
+                    val gem = geminiKey()
+                    val groq = groqKey()
+                    if (gem == null && groq == null) {
                         cb(Reply(null, Action("web_search", mapOf("query" to q))))
                     } else {
+                        val hist = ArrayList(history)
+                        val system = systemPrompt()
                         Thread {
-                            val text = try {
-                                LlmClient.webAnswer(key, q, prefs.userName).ifBlank { "No he encontrado nada concluyente sobre eso." }
-                            } catch (e: Exception) {
-                                "No he podido buscarlo en internet. ${LlmClient.friendly(e)}"
+                            var text: String? = null
+                            var err: Exception? = null
+                            if (gem != null) {
+                                try { text = LlmClient.webAnswer(gem, q, prefs.userName).ifBlank { null } } catch (e: Exception) { err = e }
                             }
-                            main.post { cb(Reply(text)) }
+                            if (text == null && groq != null) {
+                                try { text = parseLlm(Groq.chat(groq, system, hist, q)).text } catch (e: Exception) { if (err == null) err = e }
+                            }
+                            val out = text ?: "No he podido buscarlo en internet. ${err?.let { LlmClient.friendly(it) } ?: ""}".trim()
+                            main.post { cb(Reply(out)) }
                         }.start()
                     }
                 }
@@ -165,20 +207,26 @@ El usuario te habla por voz: recibirás directamente su audio. Puede empezar con
 
     private fun askLlm(text: String, cb: (Reply) -> Unit) {
         val key = prefs.apiKey
-        if (key.isBlank()) {
-            cb(Reply("No he entendido la orden. Si quiere que además pueda conversar con usted, añada una clave de API en mis ajustes."))
+        val groq = groqKey()
+        if (key.isBlank() && groq == null) {
+            cb(Reply("No he entendido la orden. Si quiere que además pueda conversar con usted, añada una clave de Gemini o de Groq en mis ajustes."))
             return
         }
         val hist = ArrayList(history)
         val system = systemPrompt()
         val model = prefs.model
         Thread {
-            val reply = try {
-                parseLlm(LlmClient.ask(key, model, system, hist, text))
-            } catch (e: Exception) {
-                Reply("Lo siento, no he podido conectar con mi cerebro en la nube. ${LlmClient.friendly(e)}")
+            var reply: Reply? = null
+            var err: Exception? = null
+            // Groq primero (más rápido); si falla, Gemini (o Claude); y al revés.
+            if (groq != null) {
+                try { reply = parseLlm(Groq.chat(groq, system, hist, text)) } catch (e: Exception) { err = e }
             }
-            main.post { routeInternal(reply, cb) }
+            if (reply == null && key.isNotBlank()) {
+                try { reply = parseLlm(LlmClient.ask(key, model, system, hist, text)) } catch (e: Exception) { if (err == null) err = e }
+            }
+            val r = reply ?: Reply("Lo siento, ahora mismo no logro conectar con mi cerebro en la nube. ${err?.let { LlmClient.friendly(it) } ?: ""}".trim())
+            main.post { routeInternal(r, cb) }
         }.start()
     }
 
@@ -415,8 +463,8 @@ object LlmClient {
         val c = URL(url).openConnection() as HttpURLConnection
         try {
             c.requestMethod = "POST"
-            c.connectTimeout = 8000
-            c.readTimeout = 30000
+            c.connectTimeout = 6000
+            c.readTimeout = 12000
             c.doOutput = true
             c.setRequestProperty("Content-Type", "application/json; charset=utf-8")
             for ((k, v) in headers) c.setRequestProperty(k, v)

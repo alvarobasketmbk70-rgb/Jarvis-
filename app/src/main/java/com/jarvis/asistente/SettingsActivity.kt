@@ -30,6 +30,7 @@ class SettingsActivity : Activity() {
     private lateinit var prefs: Prefs
     private lateinit var etKey: EditText
     private lateinit var etModel: EditText
+    private lateinit var etGroq: EditText
     private lateinit var etEleven: EditText
     private lateinit var etName: EditText
     private lateinit var etCc: EditText
@@ -66,6 +67,8 @@ class SettingsActivity : Activity() {
         col.addView(note("Los comandos básicos funcionan sin esto. Para conversar libremente, Janus usa una IA en la nube: pegue una clave gratuita de Google Gemini (aistudio.google.com/apikey) o una de Claude (empieza por sk-ant-)."))
         etKey = makeField("Clave de API", prefs.apiKey, secret = true); col.addView(etKey)
         etModel = makeField("Modelo (vacío = automático)", prefs.model); col.addView(etModel)
+        col.addView(note("Cerebro rápido (recomendado, gratis): con una clave de Groq (console.groq.com → API Keys) Janus entiende la voz y responde casi al instante. Gemini queda de reserva y para buscar en internet."))
+        etGroq = makeField("Clave de Groq (gsk_…)", prefs.groqKey, secret = true); col.addView(etGroq)
 
         col.addView(header("Personalización"))
         etName = makeField("¿Cómo quiere que le llame? (señor, Tony…)", if (prefs.userName == "señor") "" else prefs.userName); col.addView(etName)
@@ -137,6 +140,7 @@ class SettingsActivity : Activity() {
 
     private fun save() {
         prefs.apiKey = etKey.text.toString()
+        prefs.groqKey = etGroq.text.toString()
         prefs.elevenKey = etEleven.text.toString()
         prefs.model = etModel.text.toString()
         prefs.userName = etName.text.toString()

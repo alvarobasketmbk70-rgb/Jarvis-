@@ -95,8 +95,10 @@ Reglas: avanza lo más rápido posible hacia el objetivo; si ya se cumple, respo
     private fun agent(ctx: Context, goal: String, app: String?, onProgress: (String) -> Unit): String {
         val svc = JarvisAccessibilityService.instance
             ?: return "Para manejar las apps por usted necesito que active mi servicio de accesibilidad en ajustes."
-        val key = Prefs(ctx).apiKey
-        if (key.isBlank()) return "Para hacer tareas de varios pasos necesito la clave de Gemini en ajustes."
+        val prefs = Prefs(ctx)
+        val key = prefs.apiKey
+        val groq = prefs.groqKey
+        if (key.isBlank() && groq.isBlank()) return "Para hacer tareas de varios pasos necesito una clave de Groq o de Gemini en ajustes."
         if (goal.isBlank()) return "¿Qué quiere que haga?"
         if (app != null) {
             val found = Apps.find(ctx, app) ?: return "No encuentro la aplicación $app."
@@ -109,7 +111,11 @@ Reglas: avanza lo más rápido posible hacia el objetivo; si ya se cumple, respo
             val snap = svc.snapshot()
             val prompt = "Objetivo: $goal\nPasos ya hechos: ${if (history.isEmpty()) "ninguno" else history.joinToString("; ")}\n" +
                 "App en pantalla: ${snap.pkg}\nPantalla:\n${snap.text}"
-            val raw = LlmClient.ask(key, "", SYSTEM, emptyList(), prompt)
+            val raw = try {
+                if (groq.isNotBlank()) Groq.chat(groq, SYSTEM, emptyList(), prompt) else LlmClient.ask(key, "", SYSTEM, emptyList(), prompt)
+            } catch (e: Exception) {
+                if (groq.isNotBlank() && key.isNotBlank()) LlmClient.ask(key, "", SYSTEM, emptyList(), prompt) else throw e
+            }
             val o = try {
                 JSONObject(raw.substring(raw.indexOf('{'), raw.lastIndexOf('}') + 1))
             } catch (e: Exception) {

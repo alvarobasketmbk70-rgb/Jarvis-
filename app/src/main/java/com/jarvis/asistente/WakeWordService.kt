@@ -170,8 +170,13 @@ class WakeWordService : Service() {
             if (destroyed) return
             val l = loop
             if (l != null && !l.isAlive) loop = null
+            // Si algo se quedó colgado más de 35 s sin avanzar, se reinicia la conversación.
+            if (inInteraction && !speaker.isSpeaking && System.currentTimeMillis() - lastActivity > 35_000) {
+                speaker.stop()
+                endInteraction()
+            }
             if (!inInteraction) ensureLoop()
-            main.postDelayed(this, 20_000)
+            main.postDelayed(this, 10_000)
         }
     }
 
@@ -226,7 +231,11 @@ class WakeWordService : Service() {
     private fun isLocked(): Boolean =
         getSystemService(KeyguardManager::class.java).isKeyguardLocked || !getSystemService(PowerManager::class.java).isInteractive
 
+    @Volatile
+    private var lastActivity = 0L
+
     private fun uiShow(state: OrbView.State, msg: String? = null) {
+        lastActivity = System.currentTimeMillis()
         lastState = state
         if (msg != null) lastMsg = msg
         LockActivity.current?.show(state, msg)
@@ -234,6 +243,7 @@ class WakeWordService : Service() {
     }
 
     private fun uiText(s: String) {
+        lastActivity = System.currentTimeMillis()
         lastMsg = s
         LockActivity.current?.setText(s)
         if (overlay.isShown) overlay.setText(s)
@@ -469,7 +479,7 @@ class WakeWordService : Service() {
                                 if (speech) silence++ else if (rms < noise * 3) noise = noise * 0.97 + rms * 0.03
                             }
                         }
-                        val finish = (speech && silence >= 9) || frames >= 150 || (!speech && hadPreRoll && frames >= 25)
+                        val finish = (speech && silence >= 6) || frames >= 150 || (!speech && hadPreRoll && frames >= 25)
                         if (finish) {
                             mode = 2
                             val text = try { JSONObject(c.finalResult).optString("text", "") } catch (_: Exception) { "" }
@@ -518,10 +528,11 @@ class WakeWordService : Service() {
         if (isLocked()) showLockPanel()
         uiShow(OrbView.State.LISTENING, "")
         val chime = Chime.start()
+        val headset = HeadsetMic.start(this) // micrófono de los auriculares, si hay
         ensureLoop()
         val l = loop
         if (l == null) commandWanted = true
-        else l.startCommand(preRoll = fromWake, ignoreMs = chime.toInt() + 100)
+        else l.startCommand(preRoll = fromWake && !headset, ignoreMs = chime.toInt() + if (headset) 400 else 100)
     }
 
     private fun onNoSpeech() {
@@ -529,6 +540,7 @@ class WakeWordService : Service() {
     }
 
     private fun onInstant(text: String) {
+        HeadsetMic.stop(this)
         if (!inInteraction) {
             inInteraction = true
             if (isLocked()) showLockPanel()
@@ -539,6 +551,7 @@ class WakeWordService : Service() {
     }
 
     private fun onCommandAudio(pcm: ByteArray, localText: String) {
+        HeadsetMic.stop(this) // la respuesta suena en estéreo por los auriculares
         busy = true
         uiShow(OrbView.State.THINKING, if (localText.isNotBlank()) localText else "…")
         brain.processAudio(pcm, localText) { heard, reply ->
@@ -612,14 +625,16 @@ class WakeWordService : Service() {
         busy = false
         if (follow && inInteraction) {
             uiShow(OrbView.State.LISTENING, "")
+            val headset = HeadsetMic.start(this)
             ensureLoop()
-            loop?.startCommand(preRoll = false, ignoreMs = 250)
+            loop?.startCommand(preRoll = false, ignoreMs = if (headset) 500 else 250)
         } else {
             main.postDelayed({ if (!busy) endInteraction() }, 500)
         }
     }
 
     private fun endInteraction() {
+        HeadsetMic.stop(this)
         if (inInteraction) Chime.end()
         InteractionFocus.release(this)
         inInteraction = false

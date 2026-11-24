@@ -72,6 +72,8 @@ object LocalVoice {
                     model = OfflineTtsModelConfig(vits = vits, numThreads = 2, debug = false, provider = "cpu")
                 )
                 OfflineTts(ctx.assets, config).also {
+                    // Calentamiento: la primera frase siempre tarda más; se hace ahora y no cuando habla.
+                    try { it.generate(text = "Hola.", sid = 0, speed = 1.0f) } catch (_: Throwable) {}
                     tts = it
                     lastError = null
                     state = "lista"
@@ -108,6 +110,17 @@ object LocalVoice {
     }
 
     /** Parte el texto en frases para empezar a hablar en cuanto la primera está lista. */
-    fun sentences(text: String): List<String> =
-        text.split(Regex("(?<=[.!?;:])\\s+")).map { it.trim() }.filter { it.isNotEmpty() }
+    fun sentences(text: String): List<String> {
+        val list = text.split(Regex("(?<=[.!?;:])\\s+")).map { it.trim() }.filter { it.isNotEmpty() }.toMutableList()
+        // Si la primera frase es larga, se corta en la primera coma: así empieza a hablar antes.
+        if (list.isNotEmpty() && list[0].length > 70) {
+            val i = list[0].indexOf(',', 20)
+            if (i in 1 until list[0].length - 10) {
+                val first = list[0]
+                list[0] = first.substring(0, i + 1).trim()
+                list.add(1, first.substring(i + 1).trim())
+            }
+        }
+        return list
+    }
 }
