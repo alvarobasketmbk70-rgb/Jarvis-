@@ -67,6 +67,33 @@ class Brain(context: Context) {
         "scroll", "briefing", "weather", "wifi", "bluetooth", "airplane", "shutup", "repeat", "jarvis_settings", "open_app"
     )
 
+    @Volatile
+    private var vocab: String? = null
+    @Volatile
+    private var vocabTime = 0L
+
+    /** Nombres de sus contactos (favoritos primero) para que el transcriptor los escriba bien. */
+    private fun vocabulary(): String {
+        val now = System.currentTimeMillis()
+        vocab?.let { if (now - vocabTime < 3_600_000) return it }
+        val names = LinkedHashSet<String>()
+        if (Contacts.hasPermission(ctx)) {
+            try {
+                ctx.contentResolver.query(
+                    android.provider.ContactsContract.Contacts.CONTENT_URI,
+                    arrayOf(android.provider.ContactsContract.Contacts.DISPLAY_NAME),
+                    android.provider.ContactsContract.Contacts.HAS_PHONE_NUMBER + "=1", null,
+                    android.provider.ContactsContract.Contacts.STARRED + " DESC, " +
+                        android.provider.ContactsContract.Contacts.TIMES_CONTACTED + " DESC"
+                )?.use { c -> while (c.moveToNext() && names.size < 40) c.getString(0)?.let { names.add(it) } }
+            } catch (_: Exception) {
+            }
+        }
+        val v = if (names.isEmpty()) "" else "Contactos: " + names.joinToString(", ") + "."
+        vocab = v; vocabTime = now
+        return v
+    }
+
     private fun geminiKey(): String? = prefs.apiKey.takeIf { it.isNotBlank() && !it.startsWith("sk-ant-") }
     private fun groqKey(): String? = prefs.groqKey.takeIf { it.isNotBlank() }
 
@@ -80,7 +107,9 @@ class Brain(context: Context) {
     fun processAudio(pcm: ByteArray, fallbackText: String, cb: (String, Reply) -> Unit) {
         val local = fallbackText.trim()
         val localParse = if (local.isNotEmpty() && pending == null) Commands.parse(local) else null
-        if (localParse is Parse.Do && localParse.action.type in LOCAL_FAST) {
+        val trivial = setOf("media", "flashlight", "time", "date", "battery", "volume", "shutup", "repeat")
+        val fastOk = if (groqKey() != null) trivial else LOCAL_FAST
+        if (localParse is Parse.Do && localParse.action.type in fastOk) {
             process(local) { r -> cb(local, r) }
             return
         }
@@ -100,7 +129,7 @@ class Brain(context: Context) {
             var reply: Reply? = null
             var err = ""
             if (groq != null) {
-                try { heard = Groq.transcribe(groq, audio) } catch (e: Exception) { err = LlmClient.friendly(e) }
+                try { heard = Groq.transcribe(groq, audio, vocabulary()) } catch (e: Exception) { err = LlmClient.friendly(e) }
             }
             if (heard.isEmpty() && gem != null) {
                 try {

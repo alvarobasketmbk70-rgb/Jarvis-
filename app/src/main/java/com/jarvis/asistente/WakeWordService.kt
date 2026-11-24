@@ -362,8 +362,11 @@ class WakeWordService : Service() {
         @Volatile
         private var reqWake = false
 
-        fun startCommand(preRoll: Boolean, ignoreMs: Int) {
-            reqPreRoll = preRoll; reqIgnore = ignoreMs; reqCommand = true
+        @Volatile
+        private var reqHeadset = false
+
+        fun startCommand(preRoll: Boolean, ignoreMs: Int, headset: Boolean = false) {
+            reqPreRoll = preRoll; reqIgnore = ignoreMs; reqHeadset = headset; reqCommand = true
         }
 
         fun toWake() { reqWake = true }
@@ -402,6 +405,19 @@ class WakeWordService : Service() {
             var frames = 0
             var ignoreFrames = 0
             var hadPreRoll = false
+            var speechTotal = 0
+            // Para la orden se usa el micrófono «de reconocimiento de voz», que no distorsiona la voz
+            // como el de llamadas (con auriculares Bluetooth se mantiene el de llamadas, que es el suyo).
+            var cmdAr: AudioRecord? = null
+            var cur: AudioRecord = r
+            fun closeCmd() {
+                val a = cmdAr ?: return
+                cmdAr = null
+                try { a.stop() } catch (_: Exception) {}
+                a.release()
+                cur = r
+                try { r.startRecording() } catch (_: Exception) {}
+            }
             var levelTick = 0
 
             try {
@@ -409,11 +425,11 @@ class WakeWordService : Service() {
                 wakeRec = wr
                 r.startRecording()
                 while (running) {
-                    val n = r.read(frame, 0, frame.size)
+                    val n = cur.read(frame, 0, frame.size)
                     if (n < 0) break
                     if (n == 0) continue
 
-                    if (reqWake) { reqWake = false; mode = 0; try { wr.reset() } catch (_: Exception) {} }
+                    if (reqWake) { reqWake = false; mode = 0; closeCmd(); try { wr.reset() } catch (_: Exception) {} }
                     if (reqCommand) {
                         reqCommand = false
                         mode = 1
@@ -431,6 +447,19 @@ class WakeWordService : Service() {
                         cmdRec = Recognizer(model, RATE.toFloat())
                         speech = false; speechRun = 0; silence = 0; frames = 0
                         ignoreFrames = reqIgnore / 100
+                        speechTotal = 0
+                        if (!reqHeadset && cmdAr == null) {
+                            try {
+                                val a = AudioRecord(MediaRecorder.AudioSource.VOICE_RECOGNITION, RATE, AudioFormat.CHANNEL_IN_MONO, AudioFormat.ENCODING_PCM_16BIT, max(minBuf, RATE))
+                                if (a.state == AudioRecord.STATE_INITIALIZED) {
+                                    try { r.stop() } catch (_: Exception) {}
+                                    a.startRecording()
+                                    cmdAr = a
+                                    cur = a
+                                } else a.release()
+                            } catch (_: Exception) {
+                            }
+                        }
                     }
 
                     for (i in 0 until n) { ring[ringPos] = frame[i]; ringPos = (ringPos + 1) % ring.size }
@@ -464,6 +493,7 @@ class WakeWordService : Service() {
                             val p = strip(partial)
                             if (p.isNotEmpty() && Commands.instant(p) != null) {
                                 mode = 2
+                                closeCmd()
                                 main.post { if (loop === this) onInstant(p) }
                                 continue
                             }
@@ -471,6 +501,7 @@ class WakeWordService : Service() {
                         val thresh = max(noise * 2.5, 500.0)
                         if (frames > ignoreFrames) {
                             if (rms > thresh) {
+                                speechTotal++
                                 speechRun++
                                 if (speechRun >= 2) speech = true
                                 silence = 0
@@ -479,21 +510,27 @@ class WakeWordService : Service() {
                                 if (speech) silence++ else if (rms < noise * 3) noise = noise * 0.97 + rms * 0.03
                             }
                         }
-                        val finish = (speech && silence >= 6) || frames >= 150 || (!speech && hadPreRoll && frames >= 25)
+                        // Si aún ha dicho poco («llama a…»), se le da más margen para pensar.
+                        val endSilence = if (speechTotal < 12) 11 else 7
+                        val finish = (speech && silence >= endSilence) || frames >= 150 || (!speech && hadPreRoll && frames >= 25)
                         if (finish) {
                             mode = 2
+                            closeCmd()
                             val text = try { JSONObject(c.finalResult).optString("text", "") } catch (_: Exception) { "" }
                             val pcm = cmd.toByteArray()
                             val local = strip(text)
                             main.post { if (loop === this) onCommandAudio(pcm, local) }
                         } else if (!speech && frames >= 60) {
                             mode = 2
+                            closeCmd()
                             main.post { if (loop === this) onNoSpeech() }
                         }
                     }
                 }
             } catch (_: Exception) {
             } finally {
+                try { cmdAr?.stop() } catch (_: Exception) {}
+                try { cmdAr?.release() } catch (_: Exception) {}
                 // Si el micrófono se cortó (otra app lo usó, una llamada…), se vuelve a abrir solo.
                 if (running) main.postDelayed({ if (loop === this) { loop = null; ensureLoop() } }, 2000)
                 try { r.stop() } catch (_: Exception) {}
@@ -532,7 +569,7 @@ class WakeWordService : Service() {
         ensureLoop()
         val l = loop
         if (l == null) commandWanted = true
-        else l.startCommand(preRoll = fromWake && !headset, ignoreMs = chime.toInt() + if (headset) 400 else 100)
+        else l.startCommand(preRoll = fromWake && !headset, ignoreMs = chime.toInt() + if (headset) 400 else 100, headset = headset)
     }
 
     private fun onNoSpeech() {
@@ -627,7 +664,7 @@ class WakeWordService : Service() {
             uiShow(OrbView.State.LISTENING, "")
             val headset = HeadsetMic.start(this)
             ensureLoop()
-            loop?.startCommand(preRoll = false, ignoreMs = if (headset) 500 else 250)
+            loop?.startCommand(preRoll = false, ignoreMs = if (headset) 500 else 250, headset = headset)
         } else {
             main.postDelayed({ if (!busy) endInteraction() }, 500)
         }

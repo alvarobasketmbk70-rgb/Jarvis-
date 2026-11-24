@@ -41,7 +41,7 @@ object Groq {
     }
 
     /** Voz → texto en español. */
-    fun transcribe(key: String, wav: ByteArray): String {
+    fun transcribe(key: String, wav: ByteArray, vocabulary: String = ""): String {
         val models = (listOfNotNull(sttModel) + STT_MODELS).distinct()
         var last: Exception? = null
         for (m in models) {
@@ -57,7 +57,7 @@ object Groq {
                 field("language", "es")
                 field("response_format", "json")
                 field("temperature", "0")
-                field("prompt", "Órdenes para el asistente JANUS (se pronuncia Yanus): Spotify, WhatsApp, llamar, poner música.")
+                field("prompt", ("Órdenes para el asistente JANUS (se pronuncia Yanus): Spotify, WhatsApp, llamar, poner música. " + vocabulary).take(800))
                 body.write("--$boundary\r\nContent-Disposition: form-data; name=\"file\"; filename=\"voz.wav\"\r\nContent-Type: audio/wav\r\n\r\n".toByteArray())
                 body.write(wav)
                 body.write("\r\n--$boundary--\r\n".toByteArray())
