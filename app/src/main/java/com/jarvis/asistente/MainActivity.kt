@@ -209,6 +209,8 @@ class MainActivity : Activity() {
         // Como Siri: pausa la música mientras escucha y suena el aviso de holograma.
         InteractionFocus.hold(this)
         val chime = Chime.start()
+        // Con auriculares Bluetooth, escuchar por su micrófono (como Siri con los AirPods).
+        val headset = HeadsetMic.start(this)
         main.postDelayed({
             if (!listening) return@postDelayed
             try {
@@ -219,7 +221,7 @@ class MainActivity : Activity() {
                 recognizer?.destroy(); recognizer = null
                 idle("No he podido usar el micrófono.")
             }
-        }, chime)
+        }, chime + if (headset) 700 else 0)
     }
 
     private fun stopListening() {
@@ -231,6 +233,7 @@ class MainActivity : Activity() {
     }
 
     private fun idle(msg: String = IDLE_HINT) {
+        HeadsetMic.stop(this)
         if (orb.state != OrbView.State.IDLE) Chime.end()
         InteractionFocus.release(this)
         orb.state = OrbView.State.IDLE
@@ -294,6 +297,7 @@ class MainActivity : Activity() {
 
     // ---------------- Lógica ----------------
     private fun handleInput(text: String) {
+        HeadsetMic.stop(this) // la respuesta, en estéreo
         addBubble(text, true)
         orb.state = OrbView.State.THINKING
         status.text = "Pensando…"

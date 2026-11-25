@@ -151,6 +151,7 @@ class Speaker(context: Context, onReady: (() -> Unit)? = null) {
         neuralBusy = true
         am.requestAudioFocus(focus)
         Thread {
+            HeadsetMic.waitForStereo()
             var played = false
             if (elevenKey != null) {
                 // La voz de ElevenLabs es multilingüe: la misma voz de JANUS, hablando el otro idioma.
@@ -201,6 +202,7 @@ class Speaker(context: Context, onReady: (() -> Unit)? = null) {
         neuralBusy = true
         am.requestAudioFocus(focus)
         Thread {
+            HeadsetMic.waitForStereo()
             var played = false
             var reason: String? = null
             if (elevenKey != null) {

@@ -12,6 +12,11 @@ import android.os.Bundle
 class SummonActivity : Activity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        val act = intent?.action
+        if (act == Intent.ACTION_VOICE_COMMAND || act == android.speech.RecognizerIntent.ACTION_VOICE_SEARCH_HANDS_FREE) {
+            Diag.init(this)
+            Diag.log("Llamado desde el botón de los auriculares")
+        }
         if (!WakeWordService.summon(this)) {
             startActivity(
                 Intent(this, MainActivity::class.java)

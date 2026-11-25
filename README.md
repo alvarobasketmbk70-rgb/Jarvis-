@@ -57,6 +57,13 @@ Extra: despliegue los ajustes rápidos → lápiz → arrastre el botón **JANUS
 - Abriendo la app (le saluda y escucha).
 - **Manos libres «JANUS…»** (⚙ → interruptor experimental): deja el micrófono escuchando en segundo plano con una notificación fija. Diga «JANUS, pausa la música». Gasta batería y datos y el reconocedor de Google puede pitar; úselo cuando lo necesite (conduciendo, cocinando…).
 
+## Con auriculares
+
+- **Llamar a JANUS desde los auriculares**: mantenga pulsado (o use el gesto de asistente de sus auriculares, p. ej. doble toque) y aparece el orbe escuchando, también con el móvil bloqueado en el bolsillo. Requiere el paso 6 (JANUS como asistente predeterminado); en los auriculares Xiaomi/Redmi, en la app Xiaomi Earbuds elija «Asistente de voz» para ese gesto.
+- **Micrófono de los auriculares**: JANUS espera a que el micrófono Bluetooth esté conectado antes de grabar (no se pierde el principio de la orden). Con cable, usa el micrófono del cable.
+- **Respuesta en estéreo**: suelta el micrófono antes de hablar y espera a que vuelva el sonido normal, para no cortar sus primeras palabras. La música se pausa mientras le escucha y vuelve sola.
+- «Oye Janus» se sigue oyendo por el micrófono del móvil (escuchar siempre por el de los auriculares pondría la música en calidad de llamada).
+
 ## Modo intérprete
 
 Funciona mejor en manos libres («Oye Janus, modo traductor al inglés»): JANUS transcribe a cada persona en su idioma (con Groq o Gemini) y lee la traducción. Lo que va al otro idioma suena con una voz nativa de ese idioma: la de ElevenLabs si tiene clave (la misma voz de JANUS hablando inglés, francés…) o, si no, la voz de Google del móvil (Ajustes → Idioma → Salida de texto a voz → descargue los idiomas que use). Mientras está activo no hace falta repetir «Oye Janus».

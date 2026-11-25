@@ -448,10 +448,29 @@ class WakeWordService : Service() {
                         speech = false; speechRun = 0; silence = 0; frames = 0
                         ignoreFrames = reqIgnore / 100
                         speechTotal = 0
-                        if (!reqHeadset && cmdAr == null) {
+                        val svc = this@WakeWordService
+                        // Auriculares Bluetooth: se espera a que su micrófono esté conectado de verdad y se graba de él.
+                        val useHeadset = reqHeadset && cmdAr == null && HeadsetMic.awaitReady(svc)
+                        if (reqHeadset && !useHeadset) HeadsetMic.stop(svc)
+                        if (useHeadset) {
+                            try {
+                                val a = AudioRecord(MediaRecorder.AudioSource.VOICE_COMMUNICATION, RATE, AudioFormat.CHANNEL_IN_MONO, AudioFormat.ENCODING_PCM_16BIT, max(minBuf, RATE))
+                                if (a.state == AudioRecord.STATE_INITIALIZED) {
+                                    HeadsetMic.btInput(svc)?.let { a.preferredDevice = it }
+                                    try { r.stop() } catch (_: Exception) {}
+                                    a.startRecording()
+                                    cmdAr = a
+                                    cur = a
+                                } else a.release()
+                            } catch (_: Exception) {
+                            }
+                        }
+                        if (!useHeadset && cmdAr == null) {
                             try {
                                 val a = AudioRecord(MediaRecorder.AudioSource.VOICE_RECOGNITION, RATE, AudioFormat.CHANNEL_IN_MONO, AudioFormat.ENCODING_PCM_16BIT, max(minBuf, RATE))
                                 if (a.state == AudioRecord.STATE_INITIALIZED) {
+                                    // Con auriculares de cable, su micrófono (más cerca de la boca).
+                                    HeadsetMic.wiredMic(svc)?.let { a.preferredDevice = it }
                                     try { r.stop() } catch (_: Exception) {}
                                     a.startRecording()
                                     cmdAr = a
@@ -569,7 +588,7 @@ class WakeWordService : Service() {
         ensureLoop()
         val l = loop
         if (l == null) commandWanted = true
-        else l.startCommand(preRoll = fromWake && !headset, ignoreMs = chime.toInt() + if (headset) 400 else 100, headset = headset)
+        else l.startCommand(preRoll = fromWake && !headset, ignoreMs = chime.toInt() + if (headset) 150 else 100, headset = headset)
     }
 
     /** Silencios seguidos en modo intérprete (se sigue escuchando un rato sin palabra de activación). */
@@ -673,7 +692,7 @@ class WakeWordService : Service() {
             uiShow(OrbView.State.LISTENING, "")
             val headset = HeadsetMic.start(this)
             ensureLoop()
-            loop?.startCommand(preRoll = false, ignoreMs = if (headset) 500 else 250, headset = headset)
+            loop?.startCommand(preRoll = false, ignoreMs = if (headset) 150 else 250, headset = headset)
         } else {
             main.postDelayed({ if (!busy) endInteraction() }, 500)
         }

@@ -63,10 +63,6 @@
                 <action android:name="android.intent.action.ASSIST" />
                 <category android:name="android.intent.category.DEFAULT" />
             </intent-filter>
-            <intent-filter>
-                <action android:name="android.intent.action.VOICE_COMMAND" />
-                <category android:name="android.intent.category.DEFAULT" />
-            </intent-filter>
         </activity>
 
         <activity
@@ -79,13 +75,25 @@
             android:theme="@android:style/Theme.Translucent.NoTitleBar"
             android:turnScreenOn="true" />
 
+        <!-- Botón o gesto de los auriculares (mantener pulsado / doble toque de asistente):
+             abre el orbe de JANUS escuchando, también con el móvil bloqueado. -->
         <activity
             android:name=".SummonActivity"
             android:excludeFromRecents="true"
-            android:exported="false"
+            android:exported="true"
             android:noHistory="true"
+            android:showWhenLocked="true"
             android:taskAffinity=""
-            android:theme="@android:style/Theme.Translucent.NoTitleBar" />
+            android:theme="@android:style/Theme.Translucent.NoTitleBar">
+            <intent-filter>
+                <action android:name="android.intent.action.VOICE_COMMAND" />
+                <category android:name="android.intent.category.DEFAULT" />
+            </intent-filter>
+            <intent-filter>
+                <action android:name="android.speech.action.VOICE_SEARCH_HANDS_FREE" />
+                <category android:name="android.intent.category.DEFAULT" />
+            </intent-filter>
+        </activity>
 
         <activity
             android:name=".SettingsActivity"
