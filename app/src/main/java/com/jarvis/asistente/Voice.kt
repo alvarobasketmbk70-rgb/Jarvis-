@@ -90,6 +90,7 @@ class Speaker(context: Context, onReady: (() -> Unit)? = null) {
         "fr" -> Locale.FRANCE
         "de" -> Locale.GERMANY
         "it" -> Locale.ITALY
+        "es" -> Locale("es", "ES")
         else -> Locale.forLanguageTag(lang)
     }
 
@@ -224,12 +225,15 @@ class Speaker(context: Context, onReady: (() -> Unit)? = null) {
     }
 
     /** Si la voz se atascó en una salida que no suena, se repite por el altavoz del móvil. */
-    private fun finishOrReplay(p: PcmPlayer, gen: Int, rate: Int = p.rate) {
+    /** Devuelve true si la voz llegó a sonar. */
+    private fun finishOrReplay(p: PcmPlayer, gen: Int, rate: Int = p.rate): Boolean {
         p.finish()
         if (p.stalled && gen == generation) {
             Diag.log("Repito la voz por el altavoz del móvil")
-            PcmPlayer(gen, rate, forceSpeaker = true).apply { write(p.all()); finish() }
+            val again = PcmPlayer(gen, rate, forceSpeaker = true).apply { write(p.all()); finish() }
+            return !again.stalled
         }
+        return true
     }
 
     fun speak(text: String, done: (() -> Unit)? = null) {
@@ -273,8 +277,12 @@ class Speaker(context: Context, onReady: (() -> Unit)? = null) {
             if (!played && gen == generation) {
                 // Voz de JANUS incluida en la app: gratis, sin internet.
                 pitch = prefs.voicePitch
+                // Si aún se está preparando (o se ha quedado colgada), no se espera indefinidamente.
+                var w = 0
+                while (!LocalVoice.isReady && LocalVoice.lastError == null && w < 3000 && gen == generation) { Thread.sleep(100); w += 100 }
                 var player: PcmPlayer? = null
-                for (sentence in LocalVoice.sentences(clean)) {
+                if (!LocalVoice.isReady) Diag.log("Voz incluida no disponible (${LocalVoice.state}): uso la voz de Google")
+                else for (sentence in LocalVoice.sentences(clean)) {
                     if (gen != generation) break
                     val r = LocalVoice.synth(appCtx, sentence) ?: break
                     val p = player ?: PcmPlayer(gen, r.second).also { player = it }
@@ -282,7 +290,8 @@ class Speaker(context: Context, onReady: (() -> Unit)? = null) {
                 }
                 val p = player
                 if (p != null && p.bytes > 0) {
-                    finishOrReplay(p, gen); played = true
+                    played = finishOrReplay(p, gen)
+                    if (!played) reason = "la salida de audio no reproduce"
                 } else {
                     p?.release()
                     val detail = p?.openError
@@ -290,6 +299,11 @@ class Speaker(context: Context, onReady: (() -> Unit)? = null) {
                         ?: if (gen != generation) "interrumpida" else "estado del motor: ${LocalVoice.state}"
                     reason = (reason?.let { "$it Y además, " } ?: "") + "la voz incluida falló: $detail."
                 }
+            }
+            // Último recurso: la voz de Google del propio móvil, para que JANUS nunca se quede mudo.
+            if (!played && gen == generation) {
+                played = speakSystem(gen, clean, "es")
+                Diag.log(if (played) "Hablé con la voz de Google" else "Tampoco la voz de Google pudo hablar")
             }
             if (gen != generation) return@Thread
             neuralBusy = false
