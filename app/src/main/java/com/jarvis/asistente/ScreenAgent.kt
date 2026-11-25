@@ -46,6 +46,10 @@ object ScreenAgent {
         if (!Apps.isInstalled(ctx, spotify)) return "Spotify no está instalado."
         if (query.isBlank()) return "¿Qué quiere que ponga?"
         progress(onProgress, "Buscando «$query» en Spotify…")
+        // Que termine de sonar la voz de JANUS: su voz también cuenta como «música sonando».
+        var w = 0
+        while (SpeakState.speaking && w < 4000) { Thread.sleep(100); w += 100 }
+        Thread.sleep(300)
         val wasPlaying = musicPlaying(ctx)
         val search = Intent(MediaStore.INTENT_ACTION_MEDIA_PLAY_FROM_SEARCH)
             .setPackage(spotify)

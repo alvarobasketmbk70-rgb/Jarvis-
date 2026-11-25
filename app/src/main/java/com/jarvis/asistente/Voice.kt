@@ -58,6 +58,7 @@ class Speaker(context: Context, onReady: (() -> Unit)? = null) {
     private var generation = 0
     @Volatile
     private var neuralBusy = false
+        set(v) { field = v; SpeakState.speaking = v }
     @Volatile
     private var pitch = 1.0f
 

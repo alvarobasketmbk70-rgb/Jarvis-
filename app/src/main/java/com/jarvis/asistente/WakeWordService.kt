@@ -337,10 +337,16 @@ class WakeWordService : Service() {
     }
 
     private fun updateHeadsetWake() {
-        if (inInteraction || busy) return
+        if ((inInteraction || busy) && !headsetWake) return
+        if (inInteraction || busy) {
+            // En plena orden solo se corta si entra una llamada.
+            val m = getSystemService(android.media.AudioManager::class.java).mode
+            if (m != android.media.AudioManager.MODE_IN_CALL && m != android.media.AudioManager.MODE_RINGTONE) return
+        }
         val l = loop
         val am = getSystemService(android.media.AudioManager::class.java)
-        val want = l != null && prefs.headsetWake && !speaker.isSpeaking && !am.isMusicActive && HeadsetMic.btAvailable(this)
+        val call = am.mode == android.media.AudioManager.MODE_IN_CALL || am.mode == android.media.AudioManager.MODE_RINGTONE
+        val want = l != null && prefs.headsetWake && !call && !speaker.isSpeaking && !am.isMusicActive && HeadsetMic.btAvailable(this)
         if (want && !headsetWake) {
             if (HeadsetMic.start(this)) {
                 headsetWake = true
@@ -410,8 +416,12 @@ class WakeWordService : Service() {
 
         fun setWakeDevice(d: android.media.AudioDeviceInfo?) { wakeDevice = d; wakeDeviceDirty = true }
 
-        fun startCommand(preRoll: Boolean, ignoreMs: Int, headset: Boolean = false) {
-            reqPreRoll = preRoll; reqIgnore = ignoreMs; reqHeadset = headset; reqCommand = true
+        @Volatile
+        private var reqGreet = false
+
+        /** [greet]: si no dice nada tras llamarle, JANUS pregunta «¿qué desea?». */
+        fun startCommand(preRoll: Boolean, ignoreMs: Int, headset: Boolean = false, greet: Boolean = false) {
+            reqPreRoll = preRoll; reqIgnore = ignoreMs; reqHeadset = headset; reqGreet = greet; reqCommand = true
         }
 
         fun toWake() { reqWake = true }
@@ -450,6 +460,7 @@ class WakeWordService : Service() {
             var frames = 0
             var ignoreFrames = 0
             var hadPreRoll = false
+            var greetOnSilence = false
             var speechTotal = 0
             // Para la orden se usa el micrófono «de reconocimiento de voz», que no distorsiona la voz
             // como el de llamadas (con auriculares Bluetooth se mantiene el de llamadas, que es el suyo).
@@ -485,6 +496,7 @@ class WakeWordService : Service() {
                         mode = 1
                         cmd.reset()
                         hadPreRoll = reqPreRoll
+                        greetOnSilence = reqGreet
                         if (reqPreRoll) {
                             // Incluye los últimos 1,5 s: la orden puede ir pegada a «Oye Janus».
                             val pre = RATE * 3 / 2
@@ -582,7 +594,7 @@ class WakeWordService : Service() {
                         // Si aún ha dicho poco («llama a…»), se le da más margen para pensar.
                         val endSilence = if (speechTotal < 12) 11 else 7
                         // Solo «Hola Janus» y silencio: JANUS pregunta qué desea.
-                        if (!speech && hadPreRoll && frames >= 14) {
+                        if (!speech && greetOnSilence && frames >= (if (hadPreRoll) 14 else 18)) {
                             mode = 2
                             closeCmd()
                             main.post { if (loop === this) onWakeOnly() }
@@ -663,7 +675,7 @@ class WakeWordService : Service() {
         val l = loop
         if (l == null) commandWanted = true
         // Si «Oye Janus» ya se oyó por los auriculares, lo dicho justo después también sirve.
-        else l.startCommand(preRoll = fromWake && (!headset || headsetWake), ignoreMs = chime.toInt() + if (headset) 150 else 100, headset = headset)
+        else l.startCommand(preRoll = fromWake && (!headset || headsetWake), ignoreMs = chime.toInt() + if (headset) 150 else 100, headset = headset, greet = !greeted)
     }
 
     /** Silencios seguidos en modo intérprete (se sigue escuchando un rato sin palabra de activación). */

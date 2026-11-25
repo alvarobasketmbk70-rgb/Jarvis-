@@ -74,7 +74,11 @@ object LangCommands {
             "deja de traducir|ya no traduzcas|no traduzcas mas|ya esta bien de traducir|^(?:para|basta|ya esta|stop|terminamos|salir|sal)$"
     )
 
-    private val REMEMBER = Regex("^(?:recuerda|recuerdes|recuerde|memoriza|apunta|anota|guarda|acuerdate de|no te olvides de|no olvides)(?: en tu memoria| en la memoria)?(?: que)? (.+)$")
+    private val REMEMBER = Regex(
+        "^(?:(?:recuerda|recuerdes|recuerde|memoriza)(?: en tu memoria| en la memoria)?(?: que)?|" +
+            "(?:apunta|anota|guarda)(?: en tu memoria| en la memoria)? que|(?:apunta|anota|guarda) en (?:tu|la) memoria(?: que)?|" +
+            "acuerdate de que|no te olvides de que|no olvides que) (.+)$"
+    )
     private val RECALL = Regex("^(?:que (?:sabes|recuerdas|tienes apuntado|tienes anotado|tienes guardado)(?: de mi| sobre mi| en (?:la|tu) memoria)?|que te he (?:dicho|pedido) que recuerdes|que hay en tu memoria|tu memoria)$")
     private val FORGET_ALL = Regex("^(?:olvida|borra|vacia|limpia) (?:todo lo que sabes(?: de mi)?|tu memoria|la memoria|todos los recuerdos|todo lo que (?:te he dicho|recuerdas)|todo)$")
     private val FORGET = Regex("^(?:olvida|borra de tu memoria|olvidate de)(?: que)? (.+)$")

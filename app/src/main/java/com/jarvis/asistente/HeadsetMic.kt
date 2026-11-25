@@ -57,8 +57,15 @@ object HeadsetMic {
         }
     }
 
+    /** ¿Hay una llamada telefónica sonando o en curso? Entonces el audio es del teléfono. */
+    fun inCall(ctx: Context): Boolean {
+        val m = ctx.getSystemService(AudioManager::class.java).mode
+        return m == AudioManager.MODE_IN_CALL || m == AudioManager.MODE_RINGTONE || (m == AudioManager.MODE_IN_COMMUNICATION && !active)
+    }
+
     fun start(ctx: Context): Boolean {
         if (active) return true
+        if (inCall(ctx)) return false
         val am = ctx.getSystemService(AudioManager::class.java)
         return try {
             if (Build.VERSION.SDK_INT >= 31) {
@@ -127,7 +134,12 @@ object HeadsetMic {
             }
         } catch (_: Exception) {
         }
-        try { am.mode = if (savedMode == AudioManager.MODE_IN_COMMUNICATION) AudioManager.MODE_NORMAL else savedMode } catch (_: Exception) {}
+        // Solo se restaura el modo si sigue siendo el que puso JANUS (no durante una llamada).
+        try {
+            if (am.mode == AudioManager.MODE_IN_COMMUNICATION) {
+                am.mode = if (savedMode == AudioManager.MODE_IN_COMMUNICATION) AudioManager.MODE_NORMAL else savedMode
+            }
+        } catch (_: Exception) {}
     }
 
     /**

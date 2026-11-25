@@ -27,8 +27,12 @@ object Clarify {
             "(?: un poco de| algo de)?(?: la| una| algo| un poco)? ?(?:musica|cancion|canciones|playlist|lista|lista de reproduccion|algo|tema|temazo|temazos)?(?: en spotify| de fondo| por favor)?$"
     )
 
-    fun isVagueMusic(plain: String): Boolean =
-        VAGUE_MUSIC.matches(plain) && Regex("musica|cancion|playlist|lista|algo|tema|spotify").containsMatchIn(plain)
+    fun isVagueMusic(plain: String): Boolean {
+        if (!VAGUE_MUSIC.matches(plain)) return false
+        if (Regex("musica|cancion|playlist|lista|tema|spotify").containsMatchIn(plain)) return true
+        // «pon algo» es música; «quiero algo» o «necesito algo» no tienen por qué serlo.
+        return Regex("^(pon|ponme|reproduce|toca) (algo|un poco)$").matches(plain)
+    }
 
     /** Estilo favorito del usuario, si se lo contó a JANUS («recuerda que me gusta el rock»). */
     fun likes(ctx: android.content.Context): String? {

@@ -31,7 +31,10 @@ object Launcher {
         val c: Context = JarvisAccessibilityService.instance ?: ctx.applicationContext
         val target = intent.`package` ?: intent.component?.packageName
         val ok = launch(c, intent)
-        if (ok && target != null) verify(c, intent, target, 0)
+        // Solo se comprueba lo que debe verse en pantalla (abrir una app). Una búsqueda de música,
+        // por ejemplo, puede sonar sin que Spotify salga delante, y repetirla la reiniciaría.
+        val visible = intent.action == Intent.ACTION_MAIN || intent.hasCategory(Intent.CATEGORY_LAUNCHER)
+        if (ok && target != null && visible) verify(c, intent, target, 0)
         return ok
     }
 
@@ -98,6 +101,12 @@ object Launcher {
     }
 }
 
+/** Si JANUS está hablando: su voz cuenta como «música sonando» para Android. */
+object SpeakState {
+    @Volatile
+    var speaking = false
+}
+
 /** Teclas multimedia con comprobación: si la música no hizo caso, se repite. */
 object MediaControl {
     fun send(ctx: Context, cmd: String) {
@@ -118,17 +127,33 @@ object MediaControl {
             Thread.sleep(350)
             key(code)
             when (cmd) {
-                "pause" -> for (n in 0 until 3) {
-                    Thread.sleep(if (n == 0) 700 else 900)
-                    if (!am.isMusicActive) continue
-                    Diag.log("La música seguía sonando tras pausar: reintento ${n + 1}.")
-                    key(if (n < 2) KeyEvent.KEYCODE_MEDIA_PAUSE else KeyEvent.KEYCODE_MEDIA_PLAY_PAUSE)
+                // Nunca se usa la tecla «alternar» al pausar: si se equivoca, volvería a sonar.
+                // Mientras JANUS habla no se comprueba (su propia voz parece música).
+                "pause" -> {
+                    var retries = 0
+                    var waited = 0
+                    while (retries < 3 && waited < 8000) {
+                        Thread.sleep(400); waited += 400
+                        if (SpeakState.speaking || waited < 700) continue
+                        if (!am.isMusicActive) break
+                        retries++
+                        Diag.log("La música seguía sonando tras pausar: reintento $retries.")
+                        key(KeyEvent.KEYCODE_MEDIA_PAUSE)
+                        Thread.sleep(500); waited += 500
+                    }
                 }
-                "play" -> for (n in 0 until 2) {
-                    Thread.sleep(1000)
-                    if (am.isMusicActive) break
-                    Diag.log("La música no arrancó: reintento ${n + 1}.")
-                    key(if (n == 0) KeyEvent.KEYCODE_MEDIA_PLAY else KeyEvent.KEYCODE_MEDIA_PLAY_PAUSE)
+                "play" -> {
+                    var retries = 0
+                    var waited = 0
+                    while (retries < 2 && waited < 8000) {
+                        Thread.sleep(400); waited += 400
+                        if (SpeakState.speaking || waited < 1000) continue
+                        if (am.isMusicActive) break
+                        retries++
+                        Diag.log("La música no arrancó: reintento $retries.")
+                        key(if (retries == 1) KeyEvent.KEYCODE_MEDIA_PLAY else KeyEvent.KEYCODE_MEDIA_PLAY_PAUSE)
+                        Thread.sleep(600); waited += 600
+                    }
                 }
             }
         }.start()
