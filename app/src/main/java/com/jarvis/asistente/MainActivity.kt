@@ -331,8 +331,8 @@ class MainActivity : Activity() {
                     }
                 }
             }
-            speaker.speak(ack) { main.post { go() } }
-            main.postDelayed({ go() }, 6000)
+            speaker.speak(ack)
+            go() // la tarea empieza ya, sin esperar a la voz
             return
         }
         if (action.type in ActionExecutor.SCREEN_TYPES) {
@@ -370,7 +370,7 @@ class MainActivity : Activity() {
         speaker.speakIn(text, lang) { main.post { fire() } }
         main.postDelayed({
             if (!fired) { Diag.log("La voz no terminó a tiempo: sigo adelante"); speaker.stop(); fire() }
-        }, 7000L + text.length * 90L)
+        }, 3000L + text.length * 80L)
     }
 
     private fun onOrbTap() {

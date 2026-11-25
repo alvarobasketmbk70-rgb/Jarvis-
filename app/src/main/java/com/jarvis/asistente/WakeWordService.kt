@@ -732,7 +732,7 @@ class WakeWordService : Service() {
                 speaker.stop()
                 fire()
             }
-        }, 7000L + text.length * 90L)
+        }, 3000L + text.length * 80L)
     }
 
     private fun handleReply(userText: String, reply: Reply) {
@@ -768,13 +768,13 @@ class WakeWordService : Service() {
         if (a != null && ScreenAgent.handles(a)) {
             // Confirma antes de ponerse (como Jarvis) y, al terminar, dice el resultado.
             val ack = reply.text?.takeIf { it.isNotBlank() }?.let { Personality.confirm(it, prefs.userName) } ?: Personality.ack(prefs.userName)
-            sayThen(ack) {
-                uiShow(OrbView.State.THINKING, "En ello…")
-                ScreenAgent.run(this, a, { p -> uiText(p) }) { result ->
-                    brain.remember(userText, result)
-                    brain.lastSpoken = result
-                    sayThen(result) { done(false) }
-                }
+            // La tarea empieza ya, sin esperar a que termine de hablar (no depende de la voz).
+            uiShow(OrbView.State.SPEAKING, ack)
+            speaker.speakIn(ack, "es")
+            ScreenAgent.run(this, a, { p -> uiText(p) }) { result ->
+                brain.remember(userText, result)
+                brain.lastSpoken = result
+                sayThen(result) { done(false) }
             }
             return
         }
