@@ -144,7 +144,7 @@ class Speaker(context: Context, onReady: (() -> Unit)? = null) {
     fun speakIn(text: String, lang: String, done: (() -> Unit)? = null) {
         val l = Languages.base(lang)
         if (l == "es" || l.isBlank()) { speak(text, done); return }
-        BeepMuter.unmuteNow(appCtx)
+        prepareOutput()
         val clean = text.replace(Regex("[*#_`]"), "").trim()
         if (clean.isEmpty()) { if (done != null) main.post { done() }; return }
         val gen = ++generation
@@ -183,14 +183,48 @@ class Speaker(context: Context, onReady: (() -> Unit)? = null) {
     }
 
     private fun fail(reason: String, done: (() -> Unit)?) {
+        Diag.log("Voz falló: $reason")
         main.post {
             onVoiceError?.invoke(reason)
             done?.invoke()
         }
     }
 
-    fun speak(text: String, done: (() -> Unit)? = null) {
+    /**
+     * Que la voz se oiga siempre: suelta el micrófono de los auriculares (si no, la voz iría por
+     * el canal de llamada), devuelve el sonido silenciado por el «bip» y, si el volumen multimedia
+     * está a cero, lo sube un poco (JANUS habla por ese volumen).
+     */
+    private fun prepareOutput() {
+        if (HeadsetMic.isActive) HeadsetMic.stop(appCtx)
         BeepMuter.unmuteNow(appCtx)
+        try {
+            val s = AudioManager.STREAM_MUSIC
+            if (am.isStreamMute(s)) Diag.log("Voz: el sonido multimedia está silenciado")
+            else if (am.getStreamVolume(s) == 0) {
+                am.setStreamVolume(s, max(1, am.getStreamMaxVolume(s) / 3), 0)
+                Diag.log("Voz: el volumen multimedia estaba a 0; lo subo para que se me oiga")
+            }
+            if (am.mode == AudioManager.MODE_IN_COMMUNICATION) Diag.log("Voz: el audio está en modo llamada")
+        } catch (_: Exception) {
+        }
+    }
+
+    /** Salida buena para la voz: auriculares (estéreo) o altavoz; nunca el auricular de llamada. */
+    private fun bestOutput(): android.media.AudioDeviceInfo? {
+        val outs = am.getDevices(AudioManager.GET_DEVICES_OUTPUTS)
+        val order = mutableListOf(
+            android.media.AudioDeviceInfo.TYPE_BLUETOOTH_A2DP, android.media.AudioDeviceInfo.TYPE_WIRED_HEADPHONES,
+            android.media.AudioDeviceInfo.TYPE_WIRED_HEADSET, android.media.AudioDeviceInfo.TYPE_USB_HEADSET
+        )
+        if (android.os.Build.VERSION.SDK_INT >= 31) order.add(1, android.media.AudioDeviceInfo.TYPE_BLE_HEADSET)
+        order.add(android.media.AudioDeviceInfo.TYPE_BUILTIN_SPEAKER)
+        for (t in order) outs.firstOrNull { it.type == t }?.let { return it }
+        return null
+    }
+
+    fun speak(text: String, done: (() -> Unit)? = null) {
+        prepareOutput()
         val clean = text.replace(Regex("[*#_`]"), "")
             .replace(Regex("J\\.?A\\.?N\\.?U\\.?S\\.?|\\bjanus\\b", RegexOption.IGNORE_CASE), "Yanus")
             .trim()
@@ -286,10 +320,22 @@ class Speaker(context: Context, onReady: (() -> Unit)? = null) {
                 .setBufferSizeInBytes(max(minBuf, rate * 4))
                 .build()
                 .also { t ->
+                    bestOutput()?.let { d -> try { t.preferredDevice = d } catch (_: Exception) {} }
                     if (pitch in 0.5f..1.5f && pitch != 1f) {
                         try { t.playbackParams = PlaybackParams().setPitch(pitch).setSpeed(1f) } catch (_: Exception) {}
                     }
                     t.play()
+                    main.postDelayed({
+                        val d = try { t.routedDevice } catch (_: Exception) { null }
+                        Diag.log("Voz por: " + when (d?.type) {
+                            android.media.AudioDeviceInfo.TYPE_BUILTIN_SPEAKER -> "altavoz del móvil"
+                            android.media.AudioDeviceInfo.TYPE_BUILTIN_EARPIECE -> "auricular de llamada (se oye muy bajo)"
+                            android.media.AudioDeviceInfo.TYPE_BLUETOOTH_A2DP -> "auriculares Bluetooth"
+                            android.media.AudioDeviceInfo.TYPE_BLUETOOTH_SCO -> "auriculares Bluetooth en modo llamada"
+                            null -> "desconocido"
+                            else -> "dispositivo ${d.type}"
+                        } + ", volumen ${am.getStreamVolume(AudioManager.STREAM_MUSIC)}/${am.getStreamMaxVolume(AudioManager.STREAM_MUSIC)}")
+                    }, 300)
                 }
         } catch (e: Exception) {
             openError = "no se pudo abrir la salida de audio (${e.javaClass.simpleName}: ${e.message ?: ""}, frecuencia=$rate)"
