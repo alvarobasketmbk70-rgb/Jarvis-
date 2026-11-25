@@ -318,11 +318,14 @@ class MainActivity : Activity() {
         }
         if (ScreenAgent.handles(action)) {
             // Tareas de varios pasos: JANUS se aparta y maneja la app él mismo.
-            status.text = reply.text ?: "En ello…"
-            if (!reply.text.isNullOrBlank()) speaker.speak(reply.text)
+            val ack = reply.text?.takeIf { it.isNotBlank() }?.let { Personality.confirm(it, prefs.userName) } ?: Personality.ack(prefs.userName)
+            status.text = ack
             moveTaskToBack(true)
-            ScreenAgent.run(this, action, { p -> status.text = p }) { result ->
-                finishTurn(userText, result, false)
+            // Primero confirma; cuando termina de hablar, se pone con la tarea.
+            speaker.speak(ack) {
+                ScreenAgent.run(this, action, { p -> status.text = p }) { result ->
+                    finishTurn(userText, result, false)
+                }
             }
             return
         }

@@ -38,7 +38,7 @@ class ActionExecutor(context: Context) {
             val say = reply.text
             if (!r.ok || r.informative) return r.text
             if (say.isNullOrBlank()) return Personality.confirm(r.text, name)
-            return say
+            return Personality.confirm(say, name)
         }
     }
 

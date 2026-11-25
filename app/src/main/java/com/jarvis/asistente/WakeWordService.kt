@@ -744,11 +744,15 @@ class WakeWordService : Service() {
         val a = reply.action
         if (InteractionFocus.touchesMedia(a)) InteractionFocus.release(this)
         if (a != null && ScreenAgent.handles(a)) {
-            uiShow(OrbView.State.THINKING, reply.text ?: "En ello…")
-            ScreenAgent.run(this, a, { p -> uiText(p) }) { result ->
-                brain.remember(userText, result)
-                brain.lastSpoken = result
-                sayThen(result) { done(false) }
+            // Confirma antes de ponerse (como Jarvis) y, al terminar, dice el resultado.
+            val ack = reply.text?.takeIf { it.isNotBlank() }?.let { Personality.confirm(it, prefs.userName) } ?: Personality.ack(prefs.userName)
+            sayThen(ack) {
+                uiShow(OrbView.State.THINKING, "En ello…")
+                ScreenAgent.run(this, a, { p -> uiText(p) }) { result ->
+                    brain.remember(userText, result)
+                    brain.lastSpoken = result
+                    sayThen(result) { done(false) }
+                }
             }
             return
         }
