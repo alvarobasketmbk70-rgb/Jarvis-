@@ -51,6 +51,16 @@ class Speaker(context: Context, onReady: (() -> Unit)? = null) {
         .setUsage(AudioAttributes.USAGE_ASSISTANT)
         .setContentType(AudioAttributes.CONTENT_TYPE_SPEECH)
         .build()
+    /** Canal multimedia (el de la música): algunos móviles silencian el canal de asistente. */
+    private val mediaAttrs = AudioAttributes.Builder()
+        .setUsage(AudioAttributes.USAGE_MEDIA)
+        .setContentType(AudioAttributes.CONTENT_TYPE_SPEECH)
+        .build()
+    private val sp = appCtx.getSharedPreferences("jarvis", Context.MODE_PRIVATE)
+    /** Se recuerda si en este móvil la voz solo suena por el canal multimedia. */
+    private var useMedia: Boolean
+        get() = sp.getBoolean("voice_media", false)
+        set(v) = sp.edit().putBoolean("voice_media", v).apply()
     private val focus = AudioFocusRequest.Builder(AudioManager.AUDIOFOCUS_GAIN_TRANSIENT_MAY_DUCK)
         .setAudioAttributes(attrs)
         .build()
@@ -115,7 +125,7 @@ class Speaker(context: Context, onReady: (() -> Unit)? = null) {
                 (male ?: voices.firstOrNull { !it.isNetworkConnectionRequired && it.locale.country == loc.country })?.let { t.voice = it }
             } catch (_: Exception) {
             }
-            t.setAudioAttributes(attrs)
+            t.setAudioAttributes(if (useMedia) mediaAttrs else attrs)
             t.setPitch(0.92f)
             t.setSpeechRate(1.0f)
             val id = UUID.randomUUID().toString()
@@ -229,9 +239,16 @@ class Speaker(context: Context, onReady: (() -> Unit)? = null) {
     private fun finishOrReplay(p: PcmPlayer, gen: Int, rate: Int = p.rate): Boolean {
         p.finish()
         if (p.stalled && gen == generation) {
-            Diag.log("Repito la voz por el altavoz del móvil")
-            val again = PcmPlayer(gen, rate, forceSpeaker = true).apply { write(p.all()); finish() }
-            return !again.stalled
+            // Se repite cambiando de canal (asistente ↔ multimedia) y por el altavoz.
+            val other = !useMedia
+            Diag.log("Repito la voz por el canal " + (if (other) "multimedia" else "de asistente") + " y el altavoz")
+            val again = PcmPlayer(gen, rate, forceSpeaker = true, media = other).apply { write(p.all()); finish() }
+            if (!again.stalled) {
+                useMedia = other
+                Diag.log("La voz funciona por el canal " + (if (other) "multimedia" else "de asistente") + ": lo usaré siempre")
+                return true
+            }
+            return false
         }
         return true
     }
@@ -279,7 +296,7 @@ class Speaker(context: Context, onReady: (() -> Unit)? = null) {
                 pitch = prefs.voicePitch
                 // Si aún se está preparando (o se ha quedado colgada), no se espera indefinidamente.
                 var w = 0
-                while (!LocalVoice.isReady && LocalVoice.lastError == null && w < 3000 && gen == generation) { Thread.sleep(100); w += 100 }
+                while (!LocalVoice.isReady && LocalVoice.lastError == null && w < 8000 && gen == generation) { Thread.sleep(100); w += 100 }
                 var player: PcmPlayer? = null
                 if (!LocalVoice.isReady) Diag.log("Voz incluida no disponible (${LocalVoice.state}): uso la voz de Google")
                 else for (sentence in LocalVoice.sentences(clean)) {
@@ -317,7 +334,10 @@ class Speaker(context: Context, onReady: (() -> Unit)? = null) {
     }
 
     /** Reproduce PCM 16 bits mono 24 kHz a medida que llega. Se corta si cambia [generation]. */
-    private inner class PcmPlayer(private val gen: Int, val rate: Int, private val forceSpeaker: Boolean = false) {
+    private inner class PcmPlayer(
+        private val gen: Int, val rate: Int, private val forceSpeaker: Boolean = false,
+        private val media: Boolean = useMedia
+    ) {
         private var track: AudioTrack? = null
         /** La salida no avanza (p. ej. auriculares Bluetooth guardados en su estuche): no se oye nada. */
         @Volatile
@@ -352,7 +372,7 @@ class Speaker(context: Context, onReady: (() -> Unit)? = null) {
         private fun open(): AudioTrack? = try {
             val minBuf = AudioTrack.getMinBufferSize(rate, AudioFormat.CHANNEL_OUT_MONO, AudioFormat.ENCODING_PCM_16BIT)
             AudioTrack.Builder()
-                .setAudioAttributes(attrs)
+                .setAudioAttributes(if (media) mediaAttrs else attrs)
                 .setAudioFormat(
                     AudioFormat.Builder()
                         .setSampleRate(rate)
