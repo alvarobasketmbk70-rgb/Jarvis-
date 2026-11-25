@@ -581,7 +581,14 @@ class WakeWordService : Service() {
                         }
                         // Si aún ha dicho poco («llama a…»), se le da más margen para pensar.
                         val endSilence = if (speechTotal < 12) 11 else 7
-                        val finish = (speech && silence >= endSilence) || frames >= 150 || (!speech && hadPreRoll && frames >= 25)
+                        // Solo «Hola Janus» y silencio: JANUS pregunta qué desea.
+                        if (!speech && hadPreRoll && frames >= 14) {
+                            mode = 2
+                            closeCmd()
+                            main.post { if (loop === this) onWakeOnly() }
+                            continue
+                        }
+                        val finish = (speech && silence >= endSilence) || frames >= 150
                         if (finish) {
                             mode = 2
                             closeCmd()
@@ -615,7 +622,23 @@ class WakeWordService : Service() {
     // ---------------- Interacción ----------------
     private fun onWake() {
         if (busy) return
+        greeted = false
         beginInteraction(fromWake = true)
+    }
+
+    /** Ya ha preguntado «¿qué desea?» en este turno (para no repetirlo en bucle). */
+    private var greeted = false
+
+    /** Ha dicho «Hola Janus» sin nada más: le pregunta qué desea y se queda escuchando. */
+    private fun onWakeOnly() {
+        if (greeted) { onNoSpeech(); return }
+        greeted = true
+        busy = true
+        HeadsetMic.stop(this) // la pregunta, en estéreo; luego se vuelve a escuchar por los auriculares
+        val text = Personality.greeting(prefs.userName)
+        brain.lastSpoken = text
+        Diag.log("Solo «Hola Janus»: pregunto qué desea")
+        sayThen(text) { done(true) }
     }
 
     fun summonNow() {
@@ -623,6 +646,7 @@ class WakeWordService : Service() {
             if (!destroyed) {
                 speaker.stop()
                 busy = false
+                greeted = false
                 beginInteraction(fromWake = false)
             }
         }
@@ -674,6 +698,7 @@ class WakeWordService : Service() {
                 brain.lastAudioError = ""
                 if (err.isNotBlank()) sayThen("No he podido entenderle. $err") { done(brain.interpLang != null) }
                 else if (brain.interpLang != null) onNoSpeech()
+                else if (!greeted) onWakeOnly() // solo se oyó «Hola Janus»
                 else endInteraction()
             } else {
                 interpSilences = 0

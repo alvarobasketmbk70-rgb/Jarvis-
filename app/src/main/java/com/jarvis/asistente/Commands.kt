@@ -76,7 +76,7 @@ object Commands {
         val u = Utt(raw)
         val p = u.plain
         if (p.isEmpty()) return null
-        if (WAKE_ONLY.matches(p)) return Parse.Say("¿Sí, {n}?", listen = true)
+        if (WAKE_ONLY.matches(p)) return Parse.Say(Personality.greeting("{n}"), listen = true)
         if (CANCEL.matches(p)) return Parse.Say(Personality.okay("{n}"))
         if (THANKS.matches(p)) return Parse.Say(Personality.thanks("{n}"))
         if (BRIEFING.matches(p)) return act("briefing")
