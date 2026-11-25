@@ -107,7 +107,32 @@ class SettingsActivity : Activity() {
         col.addView(button("6. Poner Janus como asistente predeterminado") { openDefaultAssistant() })
         col.addView(note("Con el paso 6, al mantener pulsado el botón de encendido (o deslizar desde una esquina inferior) se abrirá Janus escuchando. También puede añadir el botón «Janus» en los ajustes rápidos."))
 
+        col.addView(header("Diagnóstico"))
+        col.addView(note("Si JANUS no ejecuta una orden, aquí verá qué oyó, qué decidió y qué falló. Puede copiarlo y enviárselo a quien le ayude."))
+        col.addView(button("Registro de órdenes") { showLog() })
+
         setContentView(sv)
+    }
+
+    private fun showLog() {
+        Diag.init(this)
+        val tv = TextView(this).apply {
+            text = Diag.text()
+            setTextIsSelectable(true)
+            textSize = 12f
+            setPadding(dp(16), dp(12), dp(16), dp(12))
+        }
+        android.app.AlertDialog.Builder(this)
+            .setTitle("Registro de órdenes")
+            .setView(ScrollView(this).apply { addView(tv) })
+            .setPositiveButton("Copiar") { _, _ ->
+                val cm = getSystemService(android.content.ClipboardManager::class.java)
+                cm.setPrimaryClip(android.content.ClipData.newPlainText("JANUS", Diag.text()))
+                toast("Registro copiado.")
+            }
+            .setNeutralButton("Borrar") { _, _ -> Diag.clear(); toast("Registro borrado.") }
+            .setNegativeButton("Cerrar", null)
+            .show()
     }
 
     private fun refreshVoiceState() {

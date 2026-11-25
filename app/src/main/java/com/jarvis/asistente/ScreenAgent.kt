@@ -52,12 +52,9 @@ object ScreenAgent {
             .putExtra(SearchManager.QUERY, query)
             .putExtra(MediaStore.EXTRA_MEDIA_FOCUS, "vnd.android.cursor.item/*")
             .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-        try {
-            ctx.startActivity(search)
-        } catch (e: Exception) {
-            ctx.startActivity(
-                Intent(Intent.ACTION_VIEW, Uri.parse("spotify:search:" + Uri.encode(query)))
-                    .setPackage(spotify).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+        if (!Launcher.start(ctx, search)) {
+            Launcher.start(
+                ctx, Intent(Intent.ACTION_VIEW, Uri.parse("spotify:search:" + Uri.encode(query))).setPackage(spotify)
             )
         }
         // ¿Ha empezado a sonar sola?
@@ -103,7 +100,7 @@ Reglas: avanza lo más rápido posible hacia el objetivo; si ya se cumple, respo
         if (app != null) {
             val found = Apps.find(ctx, app) ?: return "No encuentro la aplicación $app."
             progress(onProgress, "Abriendo ${found.first}…")
-            ctx.startActivity(found.second)
+            Launcher.start(ctx, found.second)
             Thread.sleep(2200)
         }
         val history = ArrayList<String>()

@@ -51,6 +51,13 @@ class JarvisAccessibilityService : AccessibilityService() {
 
     override fun onInterrupt() {}
 
+    /** App que está ahora mismo en pantalla. */
+    fun foregroundPackage(): String? = try {
+        rootInActiveWindow?.packageName?.toString()
+    } catch (_: Exception) {
+        null
+    }
+
     override fun onAccessibilityEvent(event: AccessibilityEvent?) {
         if (waSendUntil == 0L) return
         if (System.currentTimeMillis() > waSendUntil) {

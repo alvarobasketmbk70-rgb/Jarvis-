@@ -42,12 +42,16 @@ class ActionExecutor(context: Context) {
         }
     }
 
-    fun execute(a: Action): ExecResult = try {
-        run(a)
-    } catch (e: SecurityException) {
-        ExecResult(false, "Me falta un permiso para hacer eso. Revise los permisos de Janus en ajustes.")
-    } catch (e: Exception) {
-        ExecResult(false, "Ha ocurrido un error: ${e.message ?: "desconocido"}.")
+    fun execute(a: Action): ExecResult {
+        val r = try {
+            run(a)
+        } catch (e: SecurityException) {
+            ExecResult(false, "Me falta un permiso para hacer eso. Revise los permisos de Janus en ajustes.")
+        } catch (e: Exception) {
+            ExecResult(false, "Ha ocurrido un error: ${e.message ?: "desconocido"}.")
+        }
+        Diag.log("Acción ${a.type} ${a.args} → ${if (r.ok) "OK" else "FALLO"}: ${r.text}")
+        return r
     }
 
     private fun run(a: Action): ExecResult = when (a.type) {
@@ -80,14 +84,7 @@ class ActionExecutor(context: Context) {
         else -> ExecResult(false, "Todavía no sé hacer eso.")
     }
 
-    fun start(i: Intent): Boolean {
-        i.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-        return try {
-            ctx.startActivity(i); true
-        } catch (e: ActivityNotFoundException) {
-            false
-        }
-    }
+    fun start(i: Intent): Boolean = Launcher.start(ctx, i)
 
     private fun notFound(who: String) =
         if (!Contacts.hasPermission(ctx)) ExecResult(false, "Necesito permiso para leer sus contactos. Ábrame y concédamelo.")
@@ -153,12 +150,8 @@ class ActionExecutor(context: Context) {
             "previous" -> KeyEvent.KEYCODE_MEDIA_PREVIOUS to "Canción anterior."
             else -> KeyEvent.KEYCODE_MEDIA_PLAY_PAUSE to "Hecho."
         }
-        val am = ctx.getSystemService(AudioManager::class.java)
-        // Pequeño retraso: el micrófono acaba de soltar el audio y el reproductor tiene que recuperarlo.
-        main.postDelayed({
-            am.dispatchMediaKeyEvent(KeyEvent(KeyEvent.ACTION_DOWN, code))
-            am.dispatchMediaKeyEvent(KeyEvent(KeyEvent.ACTION_UP, code))
-        }, 300)
+        // Se envía la tecla y se comprueba que la música hizo caso (si no, se repite).
+        MediaControl.send(ctx, cmd)
         return ExecResult(true, text)
     }
 

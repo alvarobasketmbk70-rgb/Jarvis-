@@ -27,7 +27,7 @@ data class Reply(
  * (rápidos y sin internet) y, si no encajan, pregunta a la IA.
  */
 class Brain(context: Context) {
-    private val ctx = context.applicationContext
+    private val ctx = context.applicationContext.also { Diag.init(it) }
     private val prefs = Prefs(ctx)
     private val main = Handler(Looper.getMainLooper())
     private val history = ArrayList<Pair<String, String>>()
@@ -45,6 +45,7 @@ class Brain(context: Context) {
             cb(Reply("No le he oído bien."))
             return
         }
+        Diag.log("Oído: «$text»" + if (interpLang != null) " (intérprete)" else "")
         if (interpLang != null) {
             interpreterText(text, cb)
             return
@@ -61,9 +62,11 @@ class Brain(context: Context) {
         }
         val parsed = Commands.parse(text)
         if (parsed != null) {
+            Diag.log("→ orden local")
             handleParse(parsed, cb)
             return
         }
+        Diag.log("→ se lo pregunto a la IA")
         askLlm(text, cb)
     }
 
@@ -161,6 +164,8 @@ class Brain(context: Context) {
             // Whisper a veces «oye» frases fantasma en silencio
             if (heard.matches(Regex("(?i)^(gracias( por ver(lo)?)?|subtítulos.*|amara\\.org.*|\\W*)$"))) heard = ""
             if (heard.isEmpty()) lastAudioError = err
+            if (err.isNotEmpty()) Diag.log("Error al entender el audio: $err")
+            Diag.log("Audio → «$heard» (local: «$local»)" + if (reply != null) " · Gemini respondió" else "")
             val h = heard.replace(Regex("(?i)^\\W*(oye|hola|hey)?\\W*(janus|yanus|llanus|jano)\\W*"), "").trim()
             main.post {
                 if (h.isEmpty()) {
@@ -439,9 +444,28 @@ Reply ONLY with a JSON object: {"translation": "the translated text", "lang": "I
             if (reply == null && key.isNotBlank()) {
                 try { reply = parseLlm(LlmClient.ask(key, model, system, hist, text)) } catch (e: Exception) { if (err == null) err = e }
             }
+            // La IA dijo «hecho» pero no mandó la orden: se le pide otra vez, una sola vez.
+            val first = reply
+            if (first != null && first.action == null && !first.listenAgain && claimsAction(first.text)) {
+                Diag.log("La IA confirmó sin acción («${first.text}»): se le pide de nuevo")
+                val fix = text + "\n\n(Atención: tu respuesta anterior confirmaba la orden pero tenía \"action\": null, así que no se ejecutó nada. " +
+                    "Devuelve de nuevo el JSON con la acción correcta de la lista. Si de verdad no hay ninguna acción que sirva, dilo.)"
+                val again = try {
+                    if (groq != null) parseLlm(Groq.chat(groq, system, hist, fix)) else parseLlm(LlmClient.ask(key, model, system, hist, fix))
+                } catch (_: Exception) { null }
+                if (again?.action != null) reply = again
+            }
+            if (reply == null) Diag.log("La IA falló: ${err?.javaClass?.simpleName} ${err?.message?.take(200)}")
+            else Diag.log("IA → «${reply?.text}» acción ${reply?.action?.type} ${reply?.action?.args}")
             val r = reply ?: Reply("Lo siento, ahora mismo no logro conectar con mi cerebro en la nube. ${err?.let { LlmClient.friendly(it) } ?: ""}".trim())
             main.post { routeInternal(r, cb) }
         }.start()
+    }
+
+    /** ¿El texto da a entender que ya ha hecho algo en el móvil? */
+    private fun claimsAction(say: String?): Boolean {
+        val t = TextUtil.stripAccents((say ?: "").lowercase(ES))
+        return Regex("\\b(hecho|considerelo|ya esta|pongo|poniendo|reproduc|abriendo|abro|llamando|llamo a|enviando|envio|enviado|mensaje (enviado|mandado)|pausad|pauso|reanud|subo|bajo|subiendo|bajando|enciendo|apago|encendida|apagada|alarma (puesta|programada)|temporizador|buscando|busco|navegando|ruta)").containsMatchIn(t)
     }
 
     private fun parseLlm(raw: String): Reply {
@@ -463,7 +487,7 @@ Reply ONLY with a JSON object: {"translation": "the translated text", "lang": "I
                         val k = keys.next()
                         if (k != "type") args[k] = a.opt(k)?.toString() ?: ""
                     }
-                    action = Action(type, args)
+                    action = ActionFix.normalize(Action(type, args))
                 }
             }
             Reply(say.ifBlank { null }, action, listen, fromLlm = true)
@@ -484,6 +508,7 @@ Responde SIEMPRE con un único objeto JSON, sin texto alrededor, con este format
 {"say": "lo que dirás en voz alta", "action": null, "listen": false}
 - "action": null si solo conversas. Si el usuario pide hacer algo en el móvil, usa UNA de las acciones de abajo.
 - "listen": true si haces una pregunta y esperas su respuesta.
+- MUY IMPORTANTE: si el usuario pide hacer algo en el móvil, "action" NUNCA puede ser null. Nunca digas «hecho», «poniendo…» o «abriendo…» sin incluir la acción: sin ella no se ejecuta nada. Usa exactamente los nombres de acción y de campos de la lista.
 
 Acciones disponibles:
 {"type":"open_app","app":"nombre de la app"}
