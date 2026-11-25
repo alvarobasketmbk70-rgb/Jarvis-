@@ -85,6 +85,7 @@ object Commands {
         if (REPEAT.matches(p)) return act("repeat")
         if (Regex("(ajustes|configuracion|opciones) de (janus|yanus|llanus)|configurar? (janus|yanus|llanus)").containsMatchIn(p)) return act("jarvis_settings")
 
+        LangCommands.parse(u)?.let { return it }
         parseMessage(u)?.let { return it }
         parseCall(u)?.let { return it }
         parseMusic(u)?.let { return it }

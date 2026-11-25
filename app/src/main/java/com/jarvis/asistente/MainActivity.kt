@@ -281,7 +281,7 @@ class MainActivity : Activity() {
             if (t.isNullOrBlank()) return
             status.text = t
             // Órdenes sencillas («pausa la música», «qué hora es»): se ejecutan sin esperar al final.
-            if (listening && Commands.instant(t) != null) {
+            if (listening && brain.interpLang == null && Commands.instant(t) != null) {
                 listening = false
                 recognizer?.cancel()
                 BeepMuter.unmuteSoon(this@MainActivity)
@@ -309,7 +309,7 @@ class MainActivity : Activity() {
         if (action == null) {
             val t = reply.text ?: "…"
             val follow = reply.listenAgain || (prefs.conversationMode && reply.fromLlm)
-            finishTurn(userText, t, follow)
+            finishTurn(userText, t, follow, reply.lang)
             return
         }
         if (ScreenAgent.handles(action)) {
@@ -336,22 +336,23 @@ class MainActivity : Activity() {
         finishTurn(userText, ActionExecutor.choose(reply, r, prefs.userName), reply.listenAgain)
     }
 
-    private fun finishTurn(userText: String, text: String, listenAfter: Boolean) {
+    private fun finishTurn(userText: String, text: String, listenAfter: Boolean, lang: String = "es") {
         brain.remember(userText, text)
         if (text.isBlank()) {
-            idle(); return
+            if (listenAfter && brain.interpLang != null && resumed) startListening() else idle()
+            return
         }
         addBubble(text, false)
-        say(text) {
+        say(text, lang) {
             if (listenAfter && resumed) startListening() else idle()
         }
     }
 
-    private fun say(text: String, done: () -> Unit) {
+    private fun say(text: String, lang: String = "es", done: () -> Unit) {
         orb.state = OrbView.State.SPEAKING
-        status.text = "Hablando…"
+        status.text = brain.interpLang?.let { "Intérprete · ${Languages.name(it)}" } ?: "Hablando…"
         brain.lastSpoken = text
-        speaker.speak(text, done)
+        speaker.speakIn(text, lang, done)
     }
 
     private fun onOrbTap() {

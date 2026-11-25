@@ -19,6 +19,9 @@ App nativa en Kotlin, pensada para el Xiaomi Redmi Note 15 4G (HyperOS / Android
 | Móvil | «enciende la linterna», «sube el volumen», «volumen al 50», «cuánta batería queda», «qué hora es», «wifi» |
 | Buscar e ir | «busca recetas de paella», «pon tutoriales de guitarra en YouTube», «llévame a la Puerta del Sol», «busca una farmacia cerca» |
 | Conversar | Cualquier otra cosa: «cuéntame un chiste», «¿qué me pongo si hace frío?»… (requiere clave de IA) |
+| Traductor en tiempo real | «modo traductor al inglés», «hazme de intérprete con francés», «traduce lo que diga al alemán». Traduce en los dos sentidos cada frase que oye, con voz nativa del otro idioma, hasta que diga «fin del traductor». |
+| Traducción puntual | «¿cómo se dice "¿dónde está la estación?" en japonés?», «traduce buenas noches al italiano» |
+| Memoria | «recuerda que aparqué en la planta -2», «recuerda que mi hermana se llama Lucía», «¿qué recuerdas de mí?», «olvida lo del aparcamiento», «borra tu memoria» |
 
 Si a una orden le falta algo, JANUS pregunta («¿Qué le digo a Juan?»). Diga «cancela» para dejarlo, «cállate» para cortarle y «repite» para que lo repita.
 
@@ -53,6 +56,10 @@ Extra: despliegue los ajustes rápidos → lápiz → arrastre el botón **JANUS
 - Botón de ajustes rápidos.
 - Abriendo la app (le saluda y escucha).
 - **Manos libres «JANUS…»** (⚙ → interruptor experimental): deja el micrófono escuchando en segundo plano con una notificación fija. Diga «JANUS, pausa la música». Gasta batería y datos y el reconocedor de Google puede pitar; úselo cuando lo necesite (conduciendo, cocinando…).
+
+## Modo intérprete
+
+Funciona mejor en manos libres («Oye Janus, modo traductor al inglés»): JANUS transcribe a cada persona en su idioma (con Groq o Gemini) y lee la traducción. Lo que va al otro idioma suena con una voz nativa de ese idioma: la de ElevenLabs si tiene clave (la misma voz de JANUS hablando inglés, francés…) o, si no, la voz de Google del móvil (Ajustes → Idioma → Salida de texto a voz → descargue los idiomas que use). Mientras está activo no hace falta repetir «Oye Janus».
 
 ## Límites que impone Android
 

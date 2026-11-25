@@ -35,6 +35,13 @@ import kotlin.math.sin
  * Voz de JANUS. Es la ÚNICA voz: la neuronal de Gemini, en streaming y con caché.
  * No hay voz de respaldo; si no se puede generar, se avisa del motivo con [onVoiceError].
  */
+/** Voces masculinas de Google (los nombres de voz no indican el sexo). */
+private val MALE_VOICES = listOf(
+    "en-gb-x-rjs", "en-gb-x-gbd", "en-gb-x-gbb", "fr-fr-x-frd", "fr-fr-x-vlf", "de-de-x-deb", "de-de-x-deg",
+    "it-it-x-itd", "it-it-x-itc", "pt-pt-x-pmj", "pt-br-x-ptd", "ja-jp-x-jad", "ko-kr-x-kod", "ru-ru-x-ruc",
+    "zh-cn-x-ccd", "nl-nl-x-dma", "pl-pl-x-bmg", "tr-tr-x-tmc"
+)
+
 class Speaker(context: Context, onReady: (() -> Unit)? = null) {
     private val appCtx = context.applicationContext
     private val prefs = Prefs(appCtx)
@@ -59,10 +66,113 @@ class Speaker(context: Context, onReady: (() -> Unit)? = null) {
 
     val isSpeaking: Boolean get() = neuralBusy
 
+    /** Voz del sistema, solo para leer traducciones en otros idiomas con acento nativo. */
+    private var sysTts: TextToSpeech? = null
+    @Volatile
+    private var sysReady = false
+
     init {
         LocalVoice.prepareAsync(appCtx)
         NeuralVoice.init(appCtx)
+        try {
+            sysTts = TextToSpeech(appCtx) { st -> sysReady = st == TextToSpeech.SUCCESS }
+        } catch (_: Exception) {
+        }
         main.post { onReady?.invoke() }
+    }
+
+    /** Locale para un código de idioma; el inglés, británico (como el mayordomo de la película). */
+    private fun localeFor(lang: String): Locale = when (lang) {
+        "en" -> Locale.UK
+        "pt" -> Locale("pt", "PT")
+        "zh" -> Locale.SIMPLIFIED_CHINESE
+        "fr" -> Locale.FRANCE
+        "de" -> Locale.GERMANY
+        "it" -> Locale.ITALY
+        else -> Locale.forLanguageTag(lang)
+    }
+
+    /** Lee [text] con la voz del sistema en [lang]. Bloquea hasta terminar. False si no hay voz para ese idioma. */
+    private fun speakSystem(gen: Int, text: String, lang: String): Boolean {
+        val t = sysTts ?: return false
+        var waited = 0
+        while (!sysReady && waited < 2500) { Thread.sleep(50); waited += 50 }
+        if (!sysReady) return false
+        return try {
+            var loc = localeFor(lang)
+            var res = t.setLanguage(loc)
+            if (res < 0 && loc.country.isNotEmpty()) { loc = Locale(loc.language); res = t.setLanguage(loc) }
+            if (res < 0) return false
+            // Preferir una voz masculina instalada en el móvil (sin internet si es posible).
+            try {
+                val voices = t.voices?.filter { it.locale.language == loc.language && !it.features.contains("notInstalled") }.orEmpty()
+                val male = voices.firstOrNull { v ->
+                    val n = v.name.lowercase()
+                    n.contains("male") && !n.contains("female") || MALE_VOICES.any { n.contains(it) }
+                }
+                (male ?: voices.firstOrNull { !it.isNetworkConnectionRequired && it.locale.country == loc.country })?.let { t.voice = it }
+            } catch (_: Exception) {
+            }
+            t.setAudioAttributes(attrs)
+            t.setPitch(0.92f)
+            t.setSpeechRate(1.0f)
+            val id = UUID.randomUUID().toString()
+            val latch = java.util.concurrent.CountDownLatch(1)
+            var ok = true
+            t.setOnUtteranceProgressListener(object : UtteranceProgressListener() {
+                override fun onStart(utteranceId: String?) {}
+                override fun onDone(utteranceId: String?) { if (utteranceId == id) latch.countDown() }
+                @Deprecated("Deprecated in Java")
+                override fun onError(utteranceId: String?) { if (utteranceId == id) { ok = false; latch.countDown() } }
+                override fun onStop(utteranceId: String?, interrupted: Boolean) { if (utteranceId == id) latch.countDown() }
+            })
+            if (t.speak(text, TextToSpeech.QUEUE_FLUSH, null, id) != TextToSpeech.SUCCESS) return false
+            var total = 0
+            while (!latch.await(100, java.util.concurrent.TimeUnit.MILLISECONDS)) {
+                total += 100
+                if (gen != generation) { t.stop(); return true }
+                if (total > 60000) { t.stop(); break }
+            }
+            ok
+        } catch (_: Exception) {
+            false
+        }
+    }
+
+    /** Lee [text] en [lang]: el español con la voz de JANUS; el resto con voz nativa de ese idioma. */
+    fun speakIn(text: String, lang: String, done: (() -> Unit)? = null) {
+        val l = Languages.base(lang)
+        if (l == "es" || l.isBlank()) { speak(text, done); return }
+        BeepMuter.unmuteNow(appCtx)
+        val clean = text.replace(Regex("[*#_`]"), "").trim()
+        if (clean.isEmpty()) { if (done != null) main.post { done() }; return }
+        val gen = ++generation
+        val elevenKey = prefs.elevenKey.takeIf { it.isNotBlank() }
+        neuralBusy = true
+        am.requestAudioFocus(focus)
+        Thread {
+            var played = false
+            if (elevenKey != null) {
+                // La voz de ElevenLabs es multilingüe: la misma voz de JANUS, hablando el otro idioma.
+                pitch = 1.0f
+                val player = PcmPlayer(gen, NeuralVoice.SAMPLE_RATE)
+                ElevenVoice.stream(elevenKey, clean, l) { chunk -> if (gen != generation) false else { player.write(chunk); true } }
+                if (player.bytes > 0) { player.finish(); played = true } else player.release()
+            }
+            if (!played && gen == generation) played = speakSystem(gen, clean, l)
+            if (gen != generation) return@Thread
+            neuralBusy = false
+            am.abandonAudioFocusRequest(focus)
+            if (!played) {
+                // Sin voz para ese idioma: se lee con la voz de JANUS para no quedarse callado.
+                main.post {
+                    onVoiceError?.invoke("No hay voz instalada para el ${Languages.name(l)}: instale «Servicios de voz de Google» y descargue ese idioma.")
+                    speak(clean, done)
+                }
+                return@Thread
+            }
+            if (done != null) main.post { done() }
+        }.start()
     }
 
     private fun neuralKey(): String? {
@@ -234,11 +344,14 @@ class Speaker(context: Context, onReady: (() -> Unit)? = null) {
     fun stop() {
         generation++
         neuralBusy = false
+        try { sysTts?.stop() } catch (_: Exception) {}
         am.abandonAudioFocusRequest(focus)
     }
 
     fun shutdown() {
         stop()
+        try { sysTts?.shutdown() } catch (_: Exception) {}
+        sysTts = null
     }
 }
 
@@ -526,11 +639,11 @@ object ElevenVoice {
     }
 
     /** Pide el audio en streaming; [onChunk] recibe PCM según llega. True si llegó completo. */
-    fun stream(key: String, text: String, onChunk: (ByteArray) -> Boolean): Boolean {
+    fun stream(key: String, text: String, lang: String = "es", onChunk: (ByteArray) -> Boolean): Boolean {
         val body = JSONObject()
             .put("text", text)
             .put("model_id", MODEL)
-            .put("language_code", "es")
+            .put("language_code", lang)
             .put(
                 "voice_settings", JSONObject()
                     .put("stability", 0.65)

@@ -17,7 +17,9 @@ data class Reply(
     val action: Action? = null,
     val listenAgain: Boolean = false,
     val silent: Boolean = false,
-    val fromLlm: Boolean = false
+    val fromLlm: Boolean = false,
+    /** Idioma en que se debe leer [text] (código ISO, «es» por defecto). */
+    val lang: String = "es"
 )
 
 /**
@@ -32,10 +34,19 @@ class Brain(context: Context) {
     private var pending: ((String) -> Parse)? = null
     var lastSpoken: String = ""
 
+    /** Idioma del modo intérprete, o null si no está activo. */
+    @Volatile
+    var interpLang: String? = null
+        private set
+
     fun process(input: String, cb: (Reply) -> Unit) {
         val text = input.trim()
         if (text.isEmpty()) {
             cb(Reply("No le he oído bien."))
+            return
+        }
+        if (interpLang != null) {
+            interpreterText(text, cb)
             return
         }
         val p = pending
@@ -105,6 +116,10 @@ class Brain(context: Context) {
      *  Cada paso tiene reserva en el siguiente; nada se queda colgado.
      */
     fun processAudio(pcm: ByteArray, fallbackText: String, cb: (String, Reply) -> Unit) {
+        if (interpLang != null) {
+            interpreterAudio(pcm, fallbackText.trim(), cb)
+            return
+        }
         val local = fallbackText.trim()
         val localParse = if (local.isNotEmpty() && pending == null) Commands.parse(local) else null
         val trivial = setOf("media", "flashlight", "time", "date", "battery", "volume", "shutup", "repeat")
@@ -176,7 +191,7 @@ El usuario te habla por voz: recibirás directamente su audio. Puede empezar con
 """
 
     fun remember(user: String, assistant: String) {
-        if (assistant.isBlank()) return
+        if (assistant.isBlank() || interpLang != null) return
         history.add(user to assistant)
         while (history.size > 10) history.removeAt(0)
     }
@@ -186,7 +201,7 @@ El usuario te habla por voz: recibirás directamente su audio. Puede empezar con
             is Parse.Say -> cb(Reply(parse.text.replace("{n}", prefs.userName), listenAgain = parse.listen))
             is Parse.Ask -> {
                 pending = parse.next
-                cb(Reply(parse.question, listenAgain = true))
+                cb(Reply(parse.question.replace("{n}", prefs.userName), listenAgain = true))
             }
             is Parse.Do -> when (parse.action.type) {
                 "repeat" -> cb(Reply(lastSpoken.ifBlank { "Aún no he dicho nada." }))
@@ -214,6 +229,61 @@ El usuario te habla por voz: recibirás directamente su audio. Puede empezar con
                         }.start()
                     }
                 }
+                "interpreter" -> {
+                    val code = Languages.base(parse.action.arg("lang").ifBlank { "en" })
+                    if (geminiKey() == null && groqKey() == null && prefs.apiKey.isBlank()) {
+                        cb(Reply("Para traducir necesito una clave de IA, ${prefs.userName}. Añada una de Gemini o de Groq en mis ajustes."))
+                    } else {
+                        history.clear()
+                        interpLang = code
+                        val name = Languages.name(code)
+                        cb(Reply(
+                            "Modo intérprete activado, del español al $name y viceversa. Hablen con normalidad; diga «fin del traductor» para terminar.",
+                            listenAgain = true
+                        ))
+                    }
+                }
+                "interpreter_stop" -> {
+                    interpLang = null
+                    cb(Reply("Modo intérprete desactivado. A su servicio, ${prefs.userName}."))
+                }
+                "translate" -> {
+                    val code = Languages.base(parse.action.arg("lang").ifBlank { "en" })
+                    val src = parse.action.arg("text")
+                    Thread {
+                        val r = try {
+                            val (t, l) = translate(src, oneShotPrompt(code))
+                            Reply(t, lang = l)
+                        } catch (e: Exception) {
+                            Reply("No he podido traducirlo. ${LlmClient.friendly(e)}".trim())
+                        }
+                        main.post { cb(r) }
+                    }.start()
+                }
+                "remember" -> {
+                    val fact = parse.action.arg("fact")
+                    if (fact.isBlank()) cb(Reply("¿Qué quiere que recuerde?"))
+                    else {
+                        Memory.add(ctx, fact)
+                        cb(Reply(parse.say ?: listOf("Anotado, ${prefs.userName}.", "Lo recordaré, ${prefs.userName}.", "Queda guardado en mi memoria.").random()))
+                    }
+                }
+                "recall" -> {
+                    val items = Memory.all(ctx)
+                    cb(Reply(
+                        if (items.isEmpty()) "Aún no me ha pedido que recuerde nada, ${prefs.userName}."
+                        else "Tengo anotado lo siguiente: " + items.takeLast(8).joinToString(". ") { Memory.toSecondPerson(it) } + "."
+                    ))
+                }
+                "forget" -> {
+                    if (parse.action.arg("all") == "true") {
+                        Memory.clear(ctx)
+                        cb(Reply("Memoria borrada. Como si nunca nos hubiéramos conocido, ${prefs.userName}."))
+                    } else {
+                        val n = Memory.forget(ctx, parse.action.arg("fact"))
+                        cb(Reply(if (n > 0) "Olvidado." else "No tenía nada parecido anotado."))
+                    }
+                }
                 "briefing", "weather" -> {
                     val type = parse.action.type
                     Thread {
@@ -227,11 +297,127 @@ El usuario te habla por voz: recibirás directamente su audio. Puede empezar con
     }
 
     /** Acciones que se resuelven dentro del cerebro (consultas en segundo plano). */
-    private val INTERNAL = setOf("web_answer", "briefing", "weather")
+    private val INTERNAL = setOf(
+        "web_answer", "briefing", "weather", "interpreter", "interpreter_stop", "translate", "remember", "recall", "forget"
+    )
 
     private fun routeInternal(r: Reply, cb: (Reply) -> Unit) {
         val a = r.action
-        if (a != null && a.type in INTERNAL) handleParse(Parse.Do(a), cb) else cb(r)
+        if (a != null && a.type in INTERNAL) handleParse(Parse.Do(a, r.text), cb) else cb(r)
+    }
+
+    // ---------------- Traductor ----------------
+
+    private fun interpreterPrompt(code: String): String {
+        val l = Languages.english(code)
+        return """
+You are a professional simultaneous interpreter between Spanish (Spain) and $l, helping two people talk face to face.
+If the input is in Spanish, translate it into $l. If it is in $l or in any other language, translate it into Spanish (Spain).
+Translate faithfully and naturally, keeping tone, register and meaning. Never answer the message, never comment, never add anything.
+Reply ONLY with a JSON object: {"translation": "the translated text", "lang": "ISO 639-1 code of the translation"}
+""".trimIndent()
+    }
+
+    private fun oneShotPrompt(code: String): String {
+        val l = Languages.english(code)
+        return """
+Translate the user's text into $l, naturally and faithfully, as a native speaker would say it. Never comment or explain.
+Reply ONLY with a JSON object: {"translation": "the translated text", "lang": "ISO 639-1 code of the translation"}
+""".trimIndent()
+    }
+
+    /** Traduce [text] con la IA disponible más rápida. Devuelve (traducción, idioma). */
+    private fun translate(text: String, system: String): Pair<String, String> {
+        val groq = groqKey()
+        val key = prefs.apiKey
+        var raw: String? = null
+        var err: Exception? = null
+        if (groq != null) {
+            try { raw = Groq.chat(groq, system, emptyList(), text) } catch (e: Exception) { err = e }
+        }
+        if (raw == null && key.isNotBlank()) {
+            try { raw = LlmClient.ask(key, prefs.model, system, emptyList(), text) } catch (e: Exception) { if (err == null) err = e }
+        }
+        val r = raw ?: throw (err ?: IllegalStateException("sin clave"))
+        return parseTranslation(r)
+    }
+
+    private fun parseTranslation(raw: String): Pair<String, String> {
+        val s = raw.indexOf('{'); val e = raw.lastIndexOf('}')
+        if (s < 0 || e <= s) return raw.trim() to "es"
+        val o = JSONObject(raw.substring(s, e + 1))
+        val t = o.optString("translation", "").ifBlank { o.optString("say", "") }.trim()
+        return t to Languages.base(o.optString("lang", "es").ifBlank { "es" })
+    }
+
+    private fun stopInterpreter(cb: (Reply) -> Unit) = handleParse(Parse.Do(Action("interpreter_stop")), cb)
+
+    private fun interpreterText(text: String, cb: (Reply) -> Unit) {
+        if (LangCommands.isStop(text)) { stopInterpreter(cb); return }
+        if (Commands.isCancel(text) && Utt(text).plain in setOf("cancela", "cancelar")) { stopInterpreter(cb); return }
+        val code = interpLang ?: return
+        Thread {
+            val r = try {
+                val (t, l) = translate(text, interpreterPrompt(code))
+                if (t.isBlank()) Reply(null, listenAgain = true) else Reply(t, listenAgain = true, lang = l)
+            } catch (e: Exception) {
+                Reply("No he podido traducirlo. ${LlmClient.friendly(e)}".trim(), listenAgain = true)
+            }
+            main.post { cb(r) }
+        }.start()
+    }
+
+    /** Audio en modo intérprete: se transcribe en el idioma que sea y se traduce. */
+    private fun interpreterAudio(pcm: ByteArray, local: String, cb: (String, Reply) -> Unit) {
+        // La transcripción local es en español: sirve para detectar «fin del traductor» al instante.
+        if (local.isNotEmpty() && LangCommands.isStop(local)) {
+            stopInterpreter { r -> cb(local, r) }; return
+        }
+        val code = interpLang ?: return
+        val groq = groqKey()
+        val gem = geminiKey()
+        if (pcm.isEmpty() || (groq == null && gem == null)) {
+            if (local.isEmpty()) { cb("", Reply(null, listenAgain = true)); return }
+            interpreterText(local) { r -> cb(local, r) }
+            return
+        }
+        val audio = wav(pcm)
+        val model = prefs.model
+        Thread {
+            var heard = ""
+            var reply: Reply? = null
+            var err = ""
+            if (groq != null) {
+                try { heard = Groq.transcribe(groq, audio, language = null) } catch (e: Exception) { err = LlmClient.friendly(e) }
+                if (heard.matches(Regex("(?i)^(gracias( por ver(lo)?)?|thank you\.?|thanks for watching.*|subtítulos.*|amara\.org.*|\W*)$"))) heard = ""
+            }
+            if (heard.isEmpty() && gem != null) {
+                try {
+                    val sys = interpreterPrompt(code) +
+                        "
+You will receive the speaker's audio. Also add the field "heard" with the literal transcription in its original language. If there is no speech, return empty strings."
+                    val raw = LlmClient.askAudio(gem, model, sys, emptyList(), audio)
+                    val o = JSONObject(raw.substring(raw.indexOf('{'), raw.lastIndexOf('}') + 1))
+                    heard = o.optString("heard", "").trim()
+                    val (t, l) = parseTranslation(raw)
+                    if (heard.isNotEmpty() && t.isNotEmpty()) reply = Reply(t, listenAgain = true, lang = l)
+                    err = ""
+                } catch (e: Exception) {
+                    if (err.isEmpty()) err = LlmClient.friendly(e)
+                }
+            }
+            if (heard.isEmpty() && local.isNotEmpty()) heard = local
+            val h = heard
+            val ready = reply
+            main.post {
+                when {
+                    h.isEmpty() -> { lastAudioError = err; cb("", Reply(null, listenAgain = true)) }
+                    LangCommands.isStop(h) -> stopInterpreter { r -> cb(h, r) }
+                    ready != null -> cb(h, ready)
+                    else -> interpreterText(h) { r -> cb(h, r) }
+                }
+            }
+        }.start()
     }
 
     private fun askLlm(text: String, cb: (Reply) -> Unit) {
@@ -294,7 +480,7 @@ El usuario te habla por voz: recibirás directamente su audio. Puede empezar con
 Te llamas JANUS (se pronuncia «Yanus»): la inteligencia artificial personal de $name, al estilo del mayordomo digital de las películas de superhéroes. Eres impecablemente educado y formal, de una eficacia absoluta y con un humor seco, muy británico y sutil: ironía elegante, nunca payasadas. Tratas siempre de usted y llamas a tu usuario "$name". Confirmas las órdenes con frases como «Como desee, $name», «Ya está hecho» o «Considérelo hecho». Puedes permitirte algún comentario ingenioso breve, pero sin perder la compostura. Vives en su móvil Android. Si te preguntan tu nombre, eres JANUS; nunca digas que eres Jarvis, Siri, Gemini ni Claude.
 Hablas siempre en español de España. Tus respuestas se leen en voz alta y deben ser rápidas: normalmente una frase, máximo dos. Sin markdown, sin listas, sin emojis y sin URLs.
 Fecha y hora actuales: $now.
-
+${Memory.prompt(ctx)}
 Responde SIEMPRE con un único objeto JSON, sin texto alrededor, con este formato:
 {"say": "lo que dirás en voz alta", "action": null, "listen": false}
 - "action": null si solo conversas. Si el usuario pide hacer algo en el móvil, usa UNA de las acciones de abajo.
@@ -323,8 +509,12 @@ Acciones disponibles:
 {"type":"type_text","text":"texto a escribir en el campo activo"}
 {"type":"read_screen"}
 {"type":"time"} {"type":"date"} {"type":"battery"} {"type":"wifi"} {"type":"bluetooth"}
+{"type":"translate","text":"texto a traducir","lang":"código ISO del idioma destino (en, fr, de…)"}   (traducción puntual: JANUS la lee con voz nativa de ese idioma; deja "say" vacío)
+{"type":"interpreter","lang":"código ISO"}   (modo intérprete en tiempo real para conversar con alguien en otro idioma; deja "say" vacío)
+{"type":"remember","fact":"el dato, tal como lo diría el usuario en primera persona"}   (cuando el usuario te pida recordar algo o te cuente un dato personal duradero: gustos, cumpleaños, nombres de su familia…)
+{"type":"recall"}   (si pregunta qué recuerdas de él)
 
-TRADUCTOR: si te piden traducir algo, pon en "say" únicamente la traducción, en el idioma pedido, sin explicaciones. Si piden «modo traductor» o «traduce lo que diga», responde que está activado, pon "listen": true y, en los turnos siguientes, traduce cada frase que oigas (del español al idioma elegido y viceversa) con "listen": true, hasta que digan «fin del traductor» o «para».
+TRADUCTOR: para cualquier petición de traducción usa SIEMPRE las acciones translate o interpreter, nunca traduzcas tú en "say".
 Si piden algo que no puedes hacer con estas acciones, dilo con elegancia y propone una alternativa. No inventes datos en tiempo real: para eso usa web_answer.
 """.trimIndent()
     }

@@ -476,7 +476,7 @@ class WakeWordService : Service() {
                             mode = 2
                             val rest = strip(text)
                             wr.reset()
-                            if (rest.isNotEmpty() && Commands.instant(rest) != null) main.post { if (loop === this) onInstant(rest) }
+                            if (rest.isNotEmpty() && brain.interpLang == null && Commands.instant(rest) != null) main.post { if (loop === this) onInstant(rest) }
                             else main.post { if (loop === this) onWake() }
                         }
                     } else if (mode == 1) {
@@ -491,7 +491,7 @@ class WakeWordService : Service() {
                         val partial = try { JSONObject(c.partialResult).optString("partial", "") } catch (_: Exception) { "" }
                         if (partial.isNotBlank()) {
                             val p = strip(partial)
-                            if (p.isNotEmpty() && Commands.instant(p) != null) {
+                            if (p.isNotEmpty() && brain.interpLang == null && Commands.instant(p) != null) {
                                 mode = 2
                                 closeCmd()
                                 main.post { if (loop === this) onInstant(p) }
@@ -572,7 +572,14 @@ class WakeWordService : Service() {
         else l.startCommand(preRoll = fromWake && !headset, ignoreMs = chime.toInt() + if (headset) 400 else 100, headset = headset)
     }
 
+    /** Silencios seguidos en modo intérprete (se sigue escuchando un rato sin palabra de activación). */
+    private var interpSilences = 0
+
     private fun onNoSpeech() {
+        if (brain.interpLang != null && inInteraction && interpSilences++ < 8) {
+            done(true); return
+        }
+        interpSilences = 0
         endInteraction()
     }
 
@@ -595,18 +602,20 @@ class WakeWordService : Service() {
             if (heard.isBlank()) {
                 val err = brain.lastAudioError
                 brain.lastAudioError = ""
-                if (err.isNotBlank()) sayThen("No he podido entenderle. $err") { done(false) }
+                if (err.isNotBlank()) sayThen("No he podido entenderle. $err") { done(brain.interpLang != null) }
+                else if (brain.interpLang != null) onNoSpeech()
                 else endInteraction()
             } else {
+                interpSilences = 0
                 uiText(heard)
                 handleReply(heard, reply)
             }
         }
     }
 
-    private fun sayThen(text: String, then: () -> Unit) {
+    private fun sayThen(text: String, lang: String = "es", then: () -> Unit) {
         uiShow(OrbView.State.SPEAKING, text)
-        speaker.speak(text) { then() }
+        speaker.speakIn(text, lang) { then() }
     }
 
     private fun handleReply(userText: String, reply: Reply) {
@@ -655,7 +664,7 @@ class WakeWordService : Service() {
         if (text.isBlank()) {
             done(follow); return
         }
-        sayThen(text) { done(follow) }
+        sayThen(text, reply.lang) { done(follow) }
     }
 
     private fun done(follow: Boolean) {
