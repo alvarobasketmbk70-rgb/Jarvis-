@@ -521,7 +521,7 @@ Si piden algo que no puedes hacer con estas acciones, dilo con elegancia y propo
 
 /** Cliente mínimo para Google Gemini o Anthropic Claude (según la clave). */
 object LlmClient {
-    class HttpError(val code: Int, body: String) : Exception(body)
+    class HttpError(val code: Int, body: String, val service: String = "") : Exception(body)
 
     fun ask(key: String, model: String, system: String, history: List<Pair<String, String>>, user: String): String =
         if (key.startsWith("sk-ant-")) claude(key, model, system, history, user)
@@ -690,7 +690,7 @@ object LlmClient {
             val code = c.responseCode
             val stream = if (code in 200..299) c.inputStream else c.errorStream
             val text = stream?.bufferedReader(Charsets.UTF_8)?.use { it.readText() } ?: ""
-            if (code !in 200..299) throw HttpError(code, text.take(400))
+            if (code !in 200..299) throw HttpError(code, text.take(400), if (url.contains("anthropic")) "Claude" else "Gemini")
             return text
         } finally {
             c.disconnect()
@@ -699,10 +699,12 @@ object LlmClient {
 
     fun friendly(e: Exception): String = when (e) {
         is HttpError -> when {
-            e.message?.contains("API_KEY", ignoreCase = true) == true -> "La clave de API no es válida."
-            e.code == 401 || e.code == 403 -> "La clave de API no es válida."
+            e.service == "Groq" && e.code == 403 && e.message?.contains("invalid_api_key") != true ->
+                "Groq rechaza la conexión desde su red. Si usa una VPN, desactívela."
+            e.message?.contains("API_KEY", ignoreCase = true) == true || e.code == 401 || e.code == 403 ->
+                if (e.service.isNotEmpty()) "La clave de ${e.service} no es válida: revísela en ajustes, en su campo, sin espacios." else "La clave de API no es válida."
             e.code == 404 -> "El modelo configurado no existe. Deje el campo de modelo vacío en ajustes."
-            e.code == 429 -> "He superado el límite de uso de la API. Inténtelo en un momento."
+            e.code == 429 -> "He superado el límite de uso de ${e.service.ifEmpty { "la API" }}. Inténtelo en un momento."
             e.code == 400 -> "La petición no es válida; revise el modelo en ajustes."
             e.code == 503 || e.code == 500 || e.code == 502 || e.code == 504 ->
                 "Los servidores de Google están saturados ahora mismo. Inténtelo de nuevo en unos segundos."

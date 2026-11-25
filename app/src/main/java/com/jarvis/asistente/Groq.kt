@@ -36,7 +36,7 @@ object Groq {
         val code = c.responseCode
         val stream = if (code in 200..299) c.inputStream else c.errorStream
         val text = stream?.bufferedReader(Charsets.UTF_8)?.use { it.readText() } ?: ""
-        if (code !in 200..299) throw LlmClient.HttpError(code, text.take(300))
+        if (code !in 200..299) throw LlmClient.HttpError(code, text.take(300), "Groq")
         return text
     }
 

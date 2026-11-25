@@ -16,9 +16,15 @@ val ES: Locale = Locale("es", "ES")
 class Prefs(context: Context) {
     private val sp = context.applicationContext.getSharedPreferences("jarvis", Context.MODE_PRIVATE)
 
+    /** Quita espacios, saltos de línea y comillas que se cuelan al copiar y pegar en el móvil. */
+    private fun cleanKey(v: String) = v.replace(Regex("[\\s\"'«»“”]"), "")
+
+    private fun storedKey(name: String) = cleanKey(sp.getString(name, "") ?: "")
+
+    /** Clave de Gemini o Claude. Una clave de Groq pegada aquí por error se ignora (se usa como Groq). */
     var apiKey: String
-        get() = sp.getString("api_key", "") ?: ""
-        set(v) = sp.edit().putString("api_key", v.trim()).apply()
+        get() = storedKey("api_key").let { if (it.startsWith("gsk_")) "" else it }
+        set(v) = sp.edit().putString("api_key", cleanKey(v)).apply()
     var model: String
         get() = sp.getString("model", "") ?: ""
         set(v) = sp.edit().putString("model", v.trim()).apply()
@@ -44,11 +50,16 @@ class Prefs(context: Context) {
         get() = "Iapetus"
         set(v) = sp.edit().putString("neural_voice_name", v).apply()
     var groqKey: String
-        get() = sp.getString("groq_key", "") ?: ""
-        set(v) = sp.edit().putString("groq_key", v.trim()).apply()
+        get() {
+            val g = storedKey("groq_key")
+            if (g.isNotEmpty() && !g.startsWith("AIza") && !g.startsWith("sk-ant-")) return g
+            // Si la de Groq acabó en el campo de Gemini, se usa igualmente.
+            return storedKey("api_key").takeIf { it.startsWith("gsk_") } ?: ""
+        }
+        set(v) = sp.edit().putString("groq_key", cleanKey(v)).apply()
     var elevenKey: String
-        get() = sp.getString("eleven_key", "") ?: ""
-        set(v) = sp.edit().putString("eleven_key", v.trim()).apply()
+        get() = storedKey("eleven_key")
+        set(v) = sp.edit().putString("eleven_key", cleanKey(v)).apply()
     var aiEffect: Boolean
         get() = true
         set(v) = sp.edit().putBoolean("ai_effect", v).apply()

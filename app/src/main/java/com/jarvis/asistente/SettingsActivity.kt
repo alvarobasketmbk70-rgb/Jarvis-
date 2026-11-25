@@ -139,8 +139,17 @@ class SettingsActivity : Activity() {
     }
 
     private fun save() {
-        prefs.apiKey = etKey.text.toString()
-        prefs.groqKey = etGroq.text.toString()
+        // Cada clave a su sitio, aunque se haya pegado en el campo equivocado.
+        var k = etKey.text.toString().trim()
+        var groq = etGroq.text.toString().trim()
+        if (k.startsWith("gsk_") && (groq.isEmpty() || groq.startsWith("AIza") || groq.startsWith("sk-ant-"))) {
+            val t = groq; groq = k; k = t
+        } else if ((groq.startsWith("AIza") || groq.startsWith("sk-ant-")) && k.isEmpty()) {
+            k = groq; groq = ""
+        }
+        etKey.setText(k); etGroq.setText(groq)
+        prefs.apiKey = k
+        prefs.groqKey = groq
         prefs.elevenKey = etEleven.text.toString()
         prefs.model = etModel.text.toString()
         prefs.userName = etName.text.toString()
