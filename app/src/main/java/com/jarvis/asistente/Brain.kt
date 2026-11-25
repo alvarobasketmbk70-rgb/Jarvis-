@@ -389,13 +389,12 @@ Reply ONLY with a JSON object: {"translation": "the translated text", "lang": "I
             var err = ""
             if (groq != null) {
                 try { heard = Groq.transcribe(groq, audio, language = null) } catch (e: Exception) { err = LlmClient.friendly(e) }
-                if (heard.matches(Regex("(?i)^(gracias( por ver(lo)?)?|thank you\.?|thanks for watching.*|subtítulos.*|amara\.org.*|\W*)$"))) heard = ""
+                if (heard.matches(Regex("(?i)^(gracias( por ver(lo)?)?|thank you\\.?|thanks for watching.*|subtítulos.*|amara\\.org.*|\\W*)$"))) heard = ""
             }
             if (heard.isEmpty() && gem != null) {
                 try {
                     val sys = interpreterPrompt(code) +
-                        "
-You will receive the speaker's audio. Also add the field "heard" with the literal transcription in its original language. If there is no speech, return empty strings."
+                        "\nYou will receive the speaker's audio. Also add the field \"heard\" with the literal transcription in its original language. If there is no speech, return empty strings."
                     val raw = LlmClient.askAudio(gem, model, sys, emptyList(), audio)
                     val o = JSONObject(raw.substring(raw.indexOf('{'), raw.lastIndexOf('}') + 1))
                     heard = o.optString("heard", "").trim()
