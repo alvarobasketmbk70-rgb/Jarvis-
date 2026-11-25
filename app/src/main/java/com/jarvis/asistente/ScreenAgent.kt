@@ -26,7 +26,7 @@ object ScreenAgent {
         Thread {
             val result = try {
                 when (a.type) {
-                    "spotify_play" -> spotify(app, a.arg("query"), onProgress)
+                    "spotify_play" -> spotify(app, a.arg("query"), a.arg("kind"), onProgress)
                     else -> agent(app, a.arg("goal"), a.arg("app").ifBlank { null }, onProgress)
                 }
             } catch (e: Exception) {
@@ -41,7 +41,7 @@ object ScreenAgent {
     private fun musicPlaying(ctx: Context) = ctx.getSystemService(AudioManager::class.java).isMusicActive
 
     // ---------- Spotify: buscar y darle al play ----------
-    private fun spotify(ctx: Context, query: String, onProgress: (String) -> Unit): String {
+    private fun spotify(ctx: Context, query: String, kind: String, onProgress: (String) -> Unit): String {
         val spotify = ActionExecutor.SPOTIFY
         if (!Apps.isInstalled(ctx, spotify)) return "Spotify no está instalado."
         if (query.isBlank()) return "¿Qué quiere que ponga?"
@@ -65,7 +65,9 @@ object ScreenAgent {
         val svc = JarvisAccessibilityService.instance
             ?: return "He buscado $query en Spotify. Para que pueda darle al play yo mismo, active mi servicio de accesibilidad."
         // Si no, que el agente termine el trabajo en la pantalla de Spotify.
-        val r = agent(ctx, "En Spotify, reproduce «$query». Si ya aparecen resultados, pulsa el primer resultado que coincida (canción, artista o lista) y asegúrate de que empiece a sonar.", null, onProgress)
+        val what = if (kind == "playlist") "una lista de reproducción (playlist) que encaje con «$query»; evita canciones sueltas"
+        else "exactamente «$query»: si es una canción, esa canción; si es un artista, el artista; si es una lista, esa lista"
+        val r = agent(ctx, "En Spotify, reproduce $what. Si ya aparecen resultados, elige el que mejor coincida (no simplemente el primero) y asegúrate de que empiece a sonar.", null, onProgress)
         if (musicPlaying(ctx)) return "Reproduciendo $query."
         if (svc.clickPlay()) {
             Thread.sleep(800)

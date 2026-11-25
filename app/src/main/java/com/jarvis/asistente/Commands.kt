@@ -153,10 +153,12 @@ object Commands {
     private val PAUSE2 = Regex("^(para|parar|deten|detener|quita|apaga|corta)( la| el)? (musica|cancion|spotify|reproduccion|audio)$")
     private val NEXT = Regex("^(siguiente|la siguiente|otra|otra cancion|salta|pasa)$|(siguiente|proxima) (cancion|tema|pista)|(pasa|salta|cambia)( de| la| esta)? (cancion|tema|pista)")
     private val PREV = Regex("^(anterior|la anterior|pon la anterior|vuelve a la anterior)$|(cancion|tema|pista) anterior")
-    private val PLAY = Regex("^(reanuda|reanudar|continua|continuar|sigue|seguir|play|dale al play|quita la pausa|vuelve a poner)( la| el)?( musica| cancion| spotify| reproduccion)?$|^(pon|ponme|reproduce)( la| algo de)? musica$")
+    private val PLAY = Regex("^(reanuda|reanudar|continua|continuar|sigue|seguir|play|dale al play|quita la pausa|vuelve a poner)( la| el)?( musica| cancion| spotify| reproduccion)?$")
 
     private fun parseMusic(u: Utt): Parse? {
         val p = u.plain
+        // «Pon música» sin decir cuál: JANUS preguntará qué le apetece (ver Clarify).
+        if (Clarify.isVagueMusic(p)) return act("spotify_play", "query" to "")
         SPOTIFY_EN.find(p)?.let { return act("spotify_play", "query" to u.g(it, 1)) }
         SPOTIFY_HINT.find(p)?.let { return act("spotify_play", "query" to u.g(it, 1)) }
         if (PAUSE1.matches(p) || PAUSE2.matches(p)) return act("media", "cmd" to "pause")

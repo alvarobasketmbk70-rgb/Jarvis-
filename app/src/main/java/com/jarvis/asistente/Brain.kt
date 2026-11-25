@@ -296,7 +296,13 @@ El usuario te habla por voz: recibirás directamente su audio. Puede empezar con
                         main.post { cb(Reply(text)) }
                     }.start()
                 }
-                else -> cb(Reply(parse.say, action = parse.action))
+                else -> {
+                    val ask = Clarify.missing(parse.action, Clarify.likes(ctx))
+                    if (ask != null) {
+                        Diag.log("Falta un dato para ${parse.action.type}: pregunto")
+                        handleParse(ask, cb)
+                    } else cb(Reply(parse.say, action = parse.action))
+                }
             }
         }
     }
@@ -308,7 +314,12 @@ El usuario te habla por voz: recibirás directamente su audio. Puede empezar con
 
     private fun routeInternal(r: Reply, cb: (Reply) -> Unit) {
         val a = r.action
-        if (a != null && a.type in INTERNAL) handleParse(Parse.Do(a, r.text), cb) else cb(r)
+        if (a != null && a.type in INTERNAL) { handleParse(Parse.Do(a, r.text), cb); return }
+        val ask = if (a != null) Clarify.missing(a, Clarify.likes(ctx)) else null
+        if (ask != null) {
+            Diag.log("La IA mandó ${a?.type} sin datos suficientes: pregunto")
+            handleParse(ask, cb)
+        } else cb(r)
     }
 
     // ---------------- Traductor ----------------
@@ -537,6 +548,12 @@ Acciones disponibles:
 {"type":"interpreter","lang":"código ISO"}   (modo intérprete en tiempo real para conversar con alguien en otro idioma; deja "say" vacío)
 {"type":"remember","fact":"el dato, tal como lo diría el usuario en primera persona"}   (cuando el usuario te pida recordar algo o te cuente un dato personal duradero: gustos, cumpleaños, nombres de su familia…)
 {"type":"recall"}   (si pregunta qué recuerdas de él)
+
+PREGUNTA ANTES DE ACTUAR: como un buen mayordomo, si a una orden le falta algo importante para hacerla BIEN, no adivines ni elijas lo primero que salga: haz UNA pregunta breve y concreta (con "action": null y "listen": true) y actúa cuando te responda, combinando su respuesta con lo que pidió antes. Ejemplos:
+- «pon música» → «¿Qué le apetece: un estilo, un artista o una canción concreta?». Si tienes anotados sus gustos, ofrécelos: «¿Le pongo algo de rock, como suele?».
+- «pon una alarma» → «¿A qué hora?»; «manda un mensaje a Juan» → «¿Qué le digo?»; «busca un restaurante» → «¿Qué tipo de comida y por qué zona?»; «llama a Carlos» si hay dudas de cuál → pregunta cuál.
+Pero si la orden ya es concreta («pon Bohemian Rhapsody», «pausa», «alarma a las 7»), actúa al momento sin preguntar. Si responde «me da igual» o «elige tú», decide tú con buen criterio (y con sus gustos si los conoces). Nunca hagas más de una pregunta a la vez.
+Cuando te responda con un estilo o un ambiente («algo de jazz», «algo tranquilo»), usa spotify_play con una búsqueda de lista adecuada, por ejemplo "jazz mix" o "música tranquila".
 
 TRADUCTOR: para cualquier petición de traducción usa SIEMPRE las acciones translate o interpreter, nunca traduzcas tú en "say".
 Si piden algo que no puedes hacer con estas acciones, dilo con elegancia y propone una alternativa. No inventes datos en tiempo real: para eso usa web_answer.

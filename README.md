@@ -23,7 +23,7 @@ App nativa en Kotlin, pensada para el Xiaomi Redmi Note 15 4G (HyperOS / Android
 | Traducción puntual | «¿cómo se dice "¿dónde está la estación?" en japonés?», «traduce buenas noches al italiano» |
 | Memoria | «recuerda que aparqué en la planta -2», «recuerda que mi hermana se llama Lucía», «¿qué recuerdas de mí?», «olvida lo del aparcamiento», «borra tu memoria» |
 
-Si a una orden le falta algo, JANUS pregunta («¿Qué le digo a Juan?»). Diga «cancela» para dejarlo, «cállate» para cortarle y «repite» para que lo repita.
+Si a una orden le falta algo, JANUS pregunta antes de actuar en vez de adivinar: «pon música» → «¿Qué le apetece escuchar? Un estilo, un artista o una canción»; «algo tranquilo» → busca una lista adecuada; «lo de antes» → reanuda; «elige tú» → decide él (con sus gustos si le ha dicho «recuerda que me gusta el rock»). Igual con mensajes («¿Qué le digo a Juan?»), alarmas, llamadas, rutas… Diga «cancela» para dejarlo, «cállate» para cortarle y «repite» para que lo repita.
 
 Con la clave de IA puesta, también entiende órdenes dichas de forma libre («¿me avisas en un cuarto de hora?», «quiero oír algo de jazz») y las convierte en acciones.
 
