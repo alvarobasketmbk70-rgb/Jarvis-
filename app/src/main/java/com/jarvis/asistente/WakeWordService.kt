@@ -722,7 +722,17 @@ class WakeWordService : Service() {
 
     private fun sayThen(text: String, lang: String = "es", then: () -> Unit) {
         uiShow(OrbView.State.SPEAKING, text)
-        speaker.speakIn(text, lang) { then() }
+        // Pase lo que pase con la voz, JANUS nunca se queda atascado: sigue con la orden.
+        var fired = false
+        val fire = { if (!fired) { fired = true; then() } }
+        speaker.speakIn(text, lang) { main.post { fire() } }
+        main.postDelayed({
+            if (!fired) {
+                Diag.log("La voz no terminó a tiempo: sigo adelante")
+                speaker.stop()
+                fire()
+            }
+        }, 7000L + text.length * 90L)
     }
 
     private fun handleReply(userText: String, reply: Reply) {

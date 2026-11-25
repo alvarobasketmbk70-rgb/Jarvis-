@@ -321,12 +321,18 @@ class MainActivity : Activity() {
             val ack = reply.text?.takeIf { it.isNotBlank() }?.let { Personality.confirm(it, prefs.userName) } ?: Personality.ack(prefs.userName)
             status.text = ack
             moveTaskToBack(true)
-            // Primero confirma; cuando termina de hablar, se pone con la tarea.
-            speaker.speak(ack) {
-                ScreenAgent.run(this, action, { p -> status.text = p }) { result ->
-                    finishTurn(userText, result, false)
+            // Primero confirma; cuando termina de hablar (o si la voz falla), se pone con la tarea.
+            var started = false
+            val go = {
+                if (!started) {
+                    started = true
+                    ScreenAgent.run(this, action, { p -> status.text = p }) { result ->
+                        finishTurn(userText, result, false)
+                    }
                 }
             }
+            speaker.speak(ack) { main.post { go() } }
+            main.postDelayed({ go() }, 6000)
             return
         }
         if (action.type in ActionExecutor.SCREEN_TYPES) {
@@ -359,7 +365,12 @@ class MainActivity : Activity() {
         orb.state = OrbView.State.SPEAKING
         status.text = brain.interpLang?.let { "Intérprete · ${Languages.name(it)}" } ?: "Hablando…"
         brain.lastSpoken = text
-        speaker.speakIn(text, lang, done)
+        var fired = false
+        val fire = { if (!fired) { fired = true; done() } }
+        speaker.speakIn(text, lang) { main.post { fire() } }
+        main.postDelayed({
+            if (!fired) { Diag.log("La voz no terminó a tiempo: sigo adelante"); speaker.stop(); fire() }
+        }, 7000L + text.length * 90L)
     }
 
     private fun onOrbTap() {

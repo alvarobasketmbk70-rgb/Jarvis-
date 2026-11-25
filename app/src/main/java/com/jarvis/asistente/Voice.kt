@@ -159,7 +159,7 @@ class Speaker(context: Context, onReady: (() -> Unit)? = null) {
                 pitch = 1.0f
                 val player = PcmPlayer(gen, NeuralVoice.SAMPLE_RATE)
                 ElevenVoice.stream(elevenKey, clean, l) { chunk -> if (gen != generation) false else { player.write(chunk); true } }
-                if (player.bytes > 0) { player.finish(); played = true } else player.release()
+                if (player.bytes > 0) { finishOrReplay(player, gen); played = true } else player.release()
             }
             if (!played && gen == generation) played = speakSystem(gen, clean, l)
             if (gen != generation) return@Thread
@@ -223,6 +223,15 @@ class Speaker(context: Context, onReady: (() -> Unit)? = null) {
         return null
     }
 
+    /** Si la voz se atascó en una salida que no suena, se repite por el altavoz del móvil. */
+    private fun finishOrReplay(p: PcmPlayer, gen: Int, rate: Int = p.rate) {
+        p.finish()
+        if (p.stalled && gen == generation) {
+            Diag.log("Repito la voz por el altavoz del móvil")
+            PcmPlayer(gen, rate, forceSpeaker = true).apply { write(p.all()); finish() }
+        }
+    }
+
     fun speak(text: String, done: (() -> Unit)? = null) {
         prepareOutput()
         val clean = text.replace(Regex("[*#_`]"), "")
@@ -245,7 +254,7 @@ class Speaker(context: Context, onReady: (() -> Unit)? = null) {
                 val voice = "eleven-" + ElevenVoice.VOICE_ID
                 val cached = NeuralVoice.cached(voice, clean)
                 if (cached != null) {
-                    PcmPlayer(gen, NeuralVoice.SAMPLE_RATE).apply { write(cached); finish() }
+                    PcmPlayer(gen, NeuralVoice.SAMPLE_RATE).also { it.write(cached); finishOrReplay(it, gen, NeuralVoice.SAMPLE_RATE) }
                     played = true
                 } else {
                     val player = PcmPlayer(gen, NeuralVoice.SAMPLE_RATE)
@@ -253,7 +262,7 @@ class Speaker(context: Context, onReady: (() -> Unit)? = null) {
                         if (gen != generation) false else { player.write(chunk); true }
                     }
                     if (player.bytes > 0) {
-                        player.finish(); played = true
+                        finishOrReplay(player, gen, NeuralVoice.SAMPLE_RATE); played = true
                         if (complete && gen == generation) NeuralVoice.store(voice, clean, player.all())
                     } else {
                         player.release()
@@ -273,7 +282,7 @@ class Speaker(context: Context, onReady: (() -> Unit)? = null) {
                 }
                 val p = player
                 if (p != null && p.bytes > 0) {
-                    p.finish(); played = true
+                    finishOrReplay(p, gen); played = true
                 } else {
                     p?.release()
                     val detail = p?.openError
@@ -294,8 +303,30 @@ class Speaker(context: Context, onReady: (() -> Unit)? = null) {
     }
 
     /** Reproduce PCM 16 bits mono 24 kHz a medida que llega. Se corta si cambia [generation]. */
-    private inner class PcmPlayer(private val gen: Int, private val rate: Int) {
+    private inner class PcmPlayer(private val gen: Int, val rate: Int, private val forceSpeaker: Boolean = false) {
         private var track: AudioTrack? = null
+        /** La salida no avanza (p. ej. auriculares Bluetooth guardados en su estuche): no se oye nada. */
+        @Volatile
+        var stalled = false
+            private set
+        private var lastHead = -1
+        private var lastMove = 0L
+
+        /** ¿Sigue sonando? Si la posición no se mueve en 2 s, la salida está atascada. */
+        private fun moving(t: AudioTrack): Boolean {
+            val h = try { t.playbackHeadPosition } catch (_: Exception) { return false }
+            val now = android.os.SystemClock.uptimeMillis()
+            if (h != lastHead || lastMove == 0L) { lastHead = h; lastMove = now }
+            if (now - lastMove > 2000) {
+                if (!stalled) {
+                    stalled = true
+                    val d = try { t.routedDevice?.type } catch (_: Exception) { null }
+                    Diag.log("Voz atascada: la salida de audio (dispositivo $d) no reproduce")
+                }
+                return false
+            }
+            return true
+        }
         private val all = ByteArrayOutputStream()
         private var carry: Byte? = null
         private val fx: AiVoiceFx? = if (prefs.aiEffect) AiVoiceFx(rate) else null
@@ -320,7 +351,9 @@ class Speaker(context: Context, onReady: (() -> Unit)? = null) {
                 .setBufferSizeInBytes(max(minBuf, rate * 4))
                 .build()
                 .also { t ->
-                    bestOutput()?.let { d -> try { t.preferredDevice = d } catch (_: Exception) {} }
+                    val out = if (forceSpeaker) am.getDevices(AudioManager.GET_DEVICES_OUTPUTS)
+                        .firstOrNull { it.type == android.media.AudioDeviceInfo.TYPE_BUILTIN_SPEAKER } else bestOutput()
+                    out?.let { d -> try { t.preferredDevice = d } catch (_: Exception) {} }
                     if (pitch in 0.5f..1.5f && pitch != 1f) {
                         try { t.playbackParams = PlaybackParams().setPitch(pitch).setSpeed(1f) } catch (_: Exception) {}
                     }
@@ -351,14 +384,21 @@ class Speaker(context: Context, onReady: (() -> Unit)? = null) {
                 data = data.copyOf(data.size - 1)
             }
             if (data.isEmpty()) return
-            val t = track ?: open()?.also { track = it } ?: return
             all.write(data, 0, data.size)
+            if (stalled) return // se guarda para repetirlo por el altavoz
+            val t = track ?: open()?.also { track = it } ?: return
             fx?.let { data = it.apply(data) }
             var off = 0
+            // Sin bloquear: si la salida se atasca, no se queda colgado para siempre.
             while (off < data.size && gen == generation) {
-                val n = t.write(data, off, data.size - off)
-                if (n <= 0) break
-                off += n
+                val n = t.write(data, off, data.size - off, AudioTrack.WRITE_NON_BLOCKING)
+                if (n < 0) break
+                if (n == 0) {
+                    if (!moving(t)) break
+                    Thread.sleep(10)
+                } else {
+                    off += n
+                }
             }
             bytes += data.size
         }
@@ -370,7 +410,7 @@ class Speaker(context: Context, onReady: (() -> Unit)? = null) {
             try {
                 val frames = bytes / 2
                 var waited = 0
-                while (gen == generation && t.playbackHeadPosition < frames && waited < 60000) {
+                while (gen == generation && t.playbackHeadPosition < frames && waited < 60000 && moving(t)) {
                     Thread.sleep(15); waited += 15
                 }
                 if (gen != generation) {
