@@ -162,6 +162,7 @@ class WakeWordService : Service() {
         receiverOn = true
         loadModel()
         main.postDelayed(watchdog, 20_000)
+        main.postDelayed(headsetCheck, 3000)
     }
 
     /** Vigilante: cada 20 s comprueba que el micrófono sigue vivo y, si no, lo reinicia. */
@@ -198,6 +199,7 @@ class WakeWordService : Service() {
             try { unregisterReceiver(screenReceiver) } catch (_: Exception) {}
         }
         stopLoop()
+        HeadsetMic.stop(this)
         InteractionFocus.release(this)
         speaker.shutdown()
         overlay.hide()
@@ -318,6 +320,41 @@ class WakeWordService : Service() {
     }
 
     // ---------------- Micrófono continuo ----------------
+    /** true mientras «Oye Janus» se escucha por el micrófono de los auriculares. */
+    private var headsetWake = false
+
+    /**
+     * Con auriculares Bluetooth puestos, «Oye Janus» se escucha por su micrófono (el móvil puede
+     * estar en el bolsillo). Mientras suena música se vuelve al micrófono del móvil, porque el
+     * enlace de micrófono pondría la música con calidad de llamada.
+     */
+    private val headsetCheck = object : Runnable {
+        override fun run() {
+            if (destroyed) return
+            try { updateHeadsetWake() } catch (_: Exception) {}
+            main.postDelayed(this, 2000)
+        }
+    }
+
+    private fun updateHeadsetWake() {
+        if (inInteraction || busy) return
+        val l = loop
+        val am = getSystemService(android.media.AudioManager::class.java)
+        val want = l != null && prefs.headsetWake && !speaker.isSpeaking && !am.isMusicActive && HeadsetMic.btAvailable(this)
+        if (want && !headsetWake) {
+            if (HeadsetMic.start(this)) {
+                headsetWake = true
+                l?.setWakeDevice(HeadsetMic.btInput(this))
+                Diag.log("«Oye Janus» por el micrófono de los auriculares")
+            }
+        } else if (!want && headsetWake) {
+            headsetWake = false
+            l?.setWakeDevice(null)
+            HeadsetMic.stop(this)
+            Diag.log("«Oye Janus» por el micrófono del móvil" + if (am.isMusicActive) " (suena música)" else "")
+        }
+    }
+
     private fun shouldListen(): Boolean =
         !destroyed && !paused && !appInForeground &&
             (prefs.wakeWord || inInteraction) &&
@@ -364,6 +401,14 @@ class WakeWordService : Service() {
 
         @Volatile
         private var reqHeadset = false
+
+        /** Micrófono preferido para oír «Oye Janus» (los auriculares) o null para el del móvil. */
+        @Volatile
+        private var wakeDevice: android.media.AudioDeviceInfo? = null
+        @Volatile
+        private var wakeDeviceDirty = false
+
+        fun setWakeDevice(d: android.media.AudioDeviceInfo?) { wakeDevice = d; wakeDeviceDirty = true }
 
         fun startCommand(preRoll: Boolean, ignoreMs: Int, headset: Boolean = false) {
             reqPreRoll = preRoll; reqIgnore = ignoreMs; reqHeadset = headset; reqCommand = true
@@ -430,6 +475,11 @@ class WakeWordService : Service() {
                     if (n == 0) continue
 
                     if (reqWake) { reqWake = false; mode = 0; closeCmd(); try { wr.reset() } catch (_: Exception) {} }
+                    if (wakeDeviceDirty) {
+                        wakeDeviceDirty = false
+                        try { r.preferredDevice = wakeDevice } catch (_: Exception) {}
+                        noise = 400.0
+                    }
                     if (reqCommand) {
                         reqCommand = false
                         mode = 1
@@ -588,7 +638,8 @@ class WakeWordService : Service() {
         ensureLoop()
         val l = loop
         if (l == null) commandWanted = true
-        else l.startCommand(preRoll = fromWake && !headset, ignoreMs = chime.toInt() + if (headset) 150 else 100, headset = headset)
+        // Si «Oye Janus» ya se oyó por los auriculares, lo dicho justo después también sirve.
+        else l.startCommand(preRoll = fromWake && (!headset || headsetWake), ignoreMs = chime.toInt() + if (headset) 150 else 100, headset = headset)
     }
 
     /** Silencios seguidos en modo intérprete (se sigue escuchando un rato sin palabra de activación). */
@@ -700,6 +751,7 @@ class WakeWordService : Service() {
 
     private fun endInteraction() {
         HeadsetMic.stop(this)
+        if (headsetWake) { headsetWake = false; loop?.setWakeDevice(null) }
         if (inInteraction) Chime.end()
         InteractionFocus.release(this)
         inInteraction = false

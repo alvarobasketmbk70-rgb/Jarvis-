@@ -46,6 +46,17 @@ object HeadsetMic {
         ctx.getSystemService(AudioManager::class.java).getDevices(AudioManager.GET_DEVICES_INPUTS)
             .firstOrNull { it.type in BT_INPUTS }
 
+    /** ¿Hay unos auriculares Bluetooth con micrófono que se pueda usar ahora? */
+    fun btAvailable(ctx: Context): Boolean {
+        val am = ctx.getSystemService(AudioManager::class.java)
+        return try {
+            if (Build.VERSION.SDK_INT >= 31) am.availableCommunicationDevices.any { it.type in BT_INPUTS }
+            else am.isBluetoothScoAvailableOffCall && am.getDevices(AudioManager.GET_DEVICES_INPUTS).any { it.type == AudioDeviceInfo.TYPE_BLUETOOTH_SCO }
+        } catch (_: Exception) {
+            false
+        }
+    }
+
     fun start(ctx: Context): Boolean {
         if (active) return true
         val am = ctx.getSystemService(AudioManager::class.java)

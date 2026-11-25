@@ -69,6 +69,9 @@ class Prefs(context: Context) {
     var listenScreenOff: Boolean
         get() = sp.getBoolean("listen_screen_off", true)
         set(v) = sp.edit().putBoolean("listen_screen_off", v).apply()
+    var headsetWake: Boolean
+        get() = sp.getBoolean("headset_wake", true)
+        set(v) = sp.edit().putBoolean("headset_wake", v).apply()
     var wakeWord: Boolean
         get() = sp.getBoolean("wake_word", true)
         set(v) = sp.edit().putBoolean("wake_word", v).apply()

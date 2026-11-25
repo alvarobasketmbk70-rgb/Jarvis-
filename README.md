@@ -62,7 +62,7 @@ Extra: despliegue los ajustes rápidos → lápiz → arrastre el botón **JANUS
 - **Llamar a JANUS desde los auriculares**: mantenga pulsado (o use el gesto de asistente de sus auriculares, p. ej. doble toque) y aparece el orbe escuchando, también con el móvil bloqueado en el bolsillo. Requiere el paso 6 (JANUS como asistente predeterminado); en los auriculares Xiaomi/Redmi, en la app Xiaomi Earbuds elija «Asistente de voz» para ese gesto.
 - **Micrófono de los auriculares**: JANUS espera a que el micrófono Bluetooth esté conectado antes de grabar (no se pierde el principio de la orden). Con cable, usa el micrófono del cable.
 - **Respuesta en estéreo**: suelta el micrófono antes de hablar y espera a que vuelva el sonido normal, para no cortar sus primeras palabras. La música se pausa mientras le escucha y vuelve sola.
-- «Oye Janus» se sigue oyendo por el micrófono del móvil (escuchar siempre por el de los auriculares pondría la música en calidad de llamada).
+- **«Oye Janus» con auriculares**: con auriculares Bluetooth conectados y sin música sonando, JANUS le escucha por el micrófono de los auriculares (puede llevar el móvil en el bolsillo). Cuando suena música vuelve al micrófono del móvil, porque escuchar por los auriculares pondría la música con calidad de llamada; en ese caso, use el botón o gesto de asistente de los auriculares. Se puede desactivar en ⚙.
 
 ## Modo intérprete
 

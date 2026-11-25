@@ -38,6 +38,7 @@ class SettingsActivity : Activity() {
     private lateinit var swWa: Switch
     private lateinit var swWake: Switch
     private lateinit var swScreenOff: Switch
+    private lateinit var swHeadsetWake: Switch
     private lateinit var spNeural: Spinner
     private lateinit var swNeural: Switch
     private lateinit var swFx: Switch
@@ -82,6 +83,7 @@ class SettingsActivity : Activity() {
         swWa = switch("Enviar WhatsApp automáticamente (requiere accesibilidad)", prefs.autoSendWhatsApp); col.addView(swWa)
         swWake = switch("Responder a «Oye Janus» con la app cerrada (con la pantalla encendida; gasta algo de batería)", prefs.wakeWord); col.addView(swWake)
         swScreenOff = switch("Escuchar también con el móvil bloqueado y la pantalla apagada (como Siri; consume más batería)", prefs.listenScreenOff); col.addView(swScreenOff)
+        swHeadsetWake = switch("Con auriculares Bluetooth, oír «Oye Janus» por su micrófono (mientras no suena música; gasta algo más de batería de los auriculares)", prefs.headsetWake); col.addView(swHeadsetWake)
         swWake.setOnCheckedChangeListener { _, on ->
             if (on && checkSelfPermission(Manifest.permission.RECORD_AUDIO) != PackageManager.PERMISSION_GRANTED) {
                 toast("Primero conceda el permiso de micrófono abriendo Janus.")
@@ -181,6 +183,7 @@ class SettingsActivity : Activity() {
         prefs.countryCode = etCc.text.toString()
         prefs.conversationMode = swConv.isChecked
         prefs.listenScreenOff = swScreenOff.isChecked
+        prefs.headsetWake = swHeadsetWake.isChecked
         prefs.autoSendWhatsApp = swWa.isChecked
     }
 
